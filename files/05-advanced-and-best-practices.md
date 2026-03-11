@@ -11,15 +11,15 @@ So far, each remote exposes a set of routes (`./Routes`). You can also expose in
 Update the remote's federation config to expose an additional entry:
 
 ```typescript
-// apps/mfe-products/module-federation.config.ts
+// apps/mfeProducts/module-federation.config.ts
 import { ModuleFederationConfig } from '@nx/module-federation';
 
 const config: ModuleFederationConfig = {
-  name: 'mfe-products',
+  name: 'mfeProducts',
   exposes: {
     // Expose the full route tree (existing)
     './Routes':
-      'apps/mfe-products/src/app/remote-entry/entry.routes.ts',
+      'apps/mfeProducts/src/app/remote-entry/entry.routes.ts',
     // Expose a single component (new)
     './ProductCard':
       'libs/products/feature/src/lib/product-card.component.ts',
@@ -41,8 +41,8 @@ import { loadRemote } from '@module-federation/enhanced/runtime';
 {
   path: 'featured',
   loadComponent: () =>
-    loadRemote<typeof import('mfe-products/ProductCard')>(
-      'mfe-products/ProductCard'
+    loadRemote<typeof import('mfeProducts/ProductCard')>(
+      'mfeProducts/ProductCard'
     ).then((m) => m!.ProductCardComponent),
 }
 ```
@@ -90,9 +90,9 @@ function loadRemoteRoutes(remoteName: string): () => Promise<Route[]> {
 }
 
 export const appRoutes: Route[] = [
-  { path: 'products', loadChildren: loadRemoteRoutes('mfe-products') },
-  { path: 'orders', loadChildren: loadRemoteRoutes('mfe-orders') },
-  { path: 'account', loadChildren: loadRemoteRoutes('mfe-account') },
+  { path: 'products', loadChildren: loadRemoteRoutes('mfeProducts') },
+  { path: 'orders', loadChildren: loadRemoteRoutes('mfeOrders') },
+  { path: 'account', loadChildren: loadRemoteRoutes('mfeAccount') },
 ];
 ```
 
@@ -101,29 +101,30 @@ export const appRoutes: Route[] = [
 Use the `@nx/angular:remote` generator with the `--host` flag to wire it automatically:
 
 ```bash
-npx nx g @nx/angular:remote apps/mfe-notifications \
+npx nx g @nx/angular:remote apps/mfeNotifications \
   --host=shell \
-  --prefix=notifications \
-  --style=scss
+  --prefix=app \
+  --style=scss \
+  --no-interactive
 ```
 
 Then complete these steps:
 
-1. **Add the URL to the manifest.** Edit `apps/shell/src/assets/module-federation.manifest.json`:
+1. **Add the URL to the manifest.** Edit `apps/shell/public/module-federation.manifest.json`:
    ```json
    {
-     "mfe-products": "http://localhost:4201",
-     "mfe-orders": "http://localhost:4202",
-     "mfe-account": "http://localhost:4203",
-     "mfe-notifications": "http://localhost:4204"
+     "mfeProducts": "http://localhost:4201/mf-manifest.json",
+     "mfeOrders": "http://localhost:4202/mf-manifest.json",
+     "mfeAccount": "http://localhost:4203/mf-manifest.json",
+     "mfeNotifications": "http://localhost:4204/mf-manifest.json"
    }
    ```
 
 2. **Verify the route was added.** The generator automatically adds a lazy route to the shell's `app.routes.ts`. Check that it is there.
 
-3. **Tag the new project.** Add `"tags": ["scope:notifications", "type:app"]` to `apps/mfe-notifications/project.json`.
+3. **Tag the new project.** Add `"tags": ["scope:notifications", "type:app"]` to `apps/mfeNotifications/project.json`.
 
-4. **Update boundary constraints.** Add a scope rule for `scope:notifications` in `eslint.config.js`.
+4. **Update boundary constraints.** Add a scope rule for `scope:notifications` in `eslint.config.mjs`.
 
 5. **Build and test.** Run `npx nx serve shell` to verify the new remote loads.
 
@@ -143,7 +144,7 @@ Nx 22 supports converting Angular projects from Webpack to **Rspack**, a Rust-ba
 
 ```bash
 npx nx g @nx/angular:convert-to-rspack shell
-npx nx g @nx/angular:convert-to-rspack mfe-products
+npx nx g @nx/angular:convert-to-rspack mfeProducts
 ```
 
 Rspack uses the same Module Federation API, so the config files stay almost identical. The trade-off is a smaller plugin ecosystem. If your setup uses standard Module Federation without exotic Webpack plugins, Rspack is worth evaluating.
@@ -198,11 +199,11 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 | 2 | Multiple Angular instances loaded | Shared config missing `singleton: true` | Nx handles this by default. Check Network tab for duplicate `@angular/core` chunks |
 | 3 | Service not shared across MFEs | Library not in Nx project graph | Verify `tsconfig.base.json` has a path alias for the library. Run `npx nx graph` to check |
 | 4 | Module-level signals not syncing | Library loaded as separate copy per MFE | Use `@Injectable({ providedIn: 'root' })` services for shared state instead |
-| 5 | Remote works standalone but blank in shell | Missing `<router-outlet>` in shell or remote entry component | Verify the shell's `AppComponent` has `<router-outlet>`. If the remote has child routes, its entry component needs one too |
+| 5 | Remote works standalone but blank in shell | Missing `<router-outlet>` in shell or remote entry component | Verify the shell's `App` component has `<router-outlet>`. If the remote has child routes, its entry component needs one too |
 | 6 | Styles leaking between MFEs | `ViewEncapsulation.None` or global CSS in remote | Use default encapsulation. No global CSS in remotes. Use CSS custom properties for theming |
-| 7 | `nx serve shell` does not load remotes | `remotes` array empty in `module-federation.config.ts` | Keep remote names in the config. Nx uses it for dev server discovery |
-| 8 | CORS errors loading `remoteEntry.js` in production | CDN missing CORS response headers | Ask your DevOps team to add `Access-Control-Allow-Origin` for the shell's domain on each remote's CDN |
-| 9 | Stale `remoteEntry.js` after deploy | CloudFront default cache TTL too long | Ask your DevOps team to create a cache behavior for `/remoteEntry.js` with 60s TTL and invalidate on deploy |
+| 7 | `nx serve shell` does not load remotes | Nx cannot discover remote projects | Verify remotes were generated with correct `--host` relationship. Check the project graph with `npx nx graph`. |
+| 8 | CORS errors loading `mf-manifest.json` in production | CDN missing CORS response headers | Ask your DevOps team to add `Access-Control-Allow-Origin` for the shell's domain on each remote's CDN |
+| 9 | Stale `remoteEntry.js` or `mf-manifest.json` after deploy | CloudFront default cache TTL too long | Ask your DevOps team to create a cache behavior for `/remoteEntry.js` and `/mf-manifest.json` with 60s TTL and invalidate on deploy |
 | 10 | Webpack required but esbuild is default | Angular 21 defaults to esbuild | The `@nx/angular:host` generator uses Webpack automatically. If you created the app differently, use `@nx/angular:convert-to-rspack` or reconfigure |
 | 11 | Circular dependency between MFEs | Remote A imports from Remote B's library | Enforce scope boundaries. Extract shared code into a `scope:shared` library |
 | 12 | Docker build slow or no cache | `COPY . .` before `npm ci` | Use multi-stage builds. Copy `package.json` first, run `npm ci`, then copy source. Ask your DevOps team to verify |
@@ -213,7 +214,7 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 - **Prefetch critical remotes:** Call `loadRemote()` in the background after shell load for routes the user is likely to visit next.
 - **Use `@defer` blocks:** Angular's deferrable views can be combined with remote loading for viewport-triggered loading.
 - **Code-split within remotes:** Remotes can have their own lazy-loaded child routes, further reducing initial bundle size.
-- **Monitor bundles:** Use `npx nx build mfe-products --statsJson` and analyze with `webpack-bundle-analyzer`.
+- **Monitor bundles:** Use `npx nx build mfeProducts --statsJson` and analyze with `webpack-bundle-analyzer`.
 - **Prefer static remotes during dev:** Only use `--devRemotes` for the remote you are actively editing. Static remotes are served from cache instantly.
 - **Check for duplicates:** Open the Network tab, filter for `@angular/core`. If more than one chunk appears, sharing is broken.
 
@@ -226,13 +227,13 @@ The 10 most common Nx and Module Federation commands (all explained in the chapt
 | Command | What It Does |
 |---|---|
 | `npx nx serve shell` | Serve the shell with all remotes (static) |
-| `npx nx serve shell --devRemotes=mfe-products` | Serve shell with products in HMR mode |
-| `npx nx serve mfe-products` | Serve a remote standalone on its own port |
+| `npx nx serve shell --devRemotes=mfeProducts` | Serve shell with products in HMR mode |
+| `npx nx serve mfeProducts` | Serve a remote standalone on its own port |
 | `npx nx build shell --configuration=production` | Production build of the shell |
-| `npx nx build mfe-products --configuration=production` | Production build of a remote |
-| `npx nx test mfe-products` | Run Vitest unit tests for a project |
+| `npx nx build mfeProducts --configuration=production` | Production build of a remote |
+| `npx nx test mfeProducts` | Run Vitest unit tests for a project |
 | `npx nx affected -t lint test build` | Lint, test, and build only affected projects |
-| `npx nx g @nx/angular:remote apps/mfe-new --host=shell` | Add a new remote wired to the shell |
+| `npx nx g @nx/angular:remote apps/mfeNew --host=shell` | Add a new remote wired to the shell |
 | `npx nx g @nx/angular:library --directory=libs/shared/my-lib --name=my-lib --importPath=@mfe-platform/my-lib` | Generate a shared library |
 | `npx nx graph` | Visualize the project dependency graph |
 | `npx nx migrate latest` | Update Nx, Angular, and all plugins |
@@ -250,21 +251,21 @@ Copy this into a Slack message or Jira ticket for your DevOps team.
 **Build commands (one per app):**
 ```
 npx nx build shell --configuration=production
-npx nx build mfe-products --configuration=production
-npx nx build mfe-orders --configuration=production
-npx nx build mfe-account --configuration=production
+npx nx build mfeProducts --configuration=production
+npx nx build mfeOrders --configuration=production
+npx nx build mfeAccount --configuration=production
 ```
 
 **Output directory per app:**
 `dist/apps/<app-name>/browser/` containing `index.html`, JS chunks, CSS, and assets.
 
 **Manifest file (shell only):**
-Located at `dist/apps/shell/browser/assets/module-federation.manifest.json`. Must be replaced with environment-specific URLs after building, before deploying. Format:
+Located at `dist/apps/shell/browser/module-federation.manifest.json`. Must be replaced with environment-specific URLs after building, before deploying. Format:
 ```json
 {
-  "mfe-products": "https://products.mfe.example.com",
-  "mfe-orders": "https://orders.mfe.example.com",
-  "mfe-account": "https://account.mfe.example.com"
+  "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+  "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+  "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
 }
 ```
 
@@ -272,10 +273,10 @@ Located at `dist/apps/shell/browser/assets/module-federation.manifest.json`. Mus
 Each remote's CDN must set `Access-Control-Allow-Origin: https://app.example.com` (the shell's domain) and `Access-Control-Allow-Methods: GET, OPTIONS`.
 
 **Cache-busting rules:**
-- `remoteEntry.js`: short TTL (60 seconds). This file changes on every deploy but its filename does NOT change.
+- `remoteEntry.js` and `mf-manifest.json`: short TTL (60 seconds). These files change on every deploy but their filenames do NOT change.
 - All other `.js` and `.css` files: 1 year cache. These are content-hashed (filename changes when content changes).
 - `index.html`: always revalidate (TTL 0).
-- After every deploy: invalidate `/index.html` and `/assets/module-federation.manifest.json` in CloudFront.
+- After every deploy: invalidate `/index.html` and `/module-federation.manifest.json` in CloudFront.
 
 **SPA routing:**
 nginx or CloudFront must return `index.html` for all routes that do not match a static file.
@@ -283,10 +284,10 @@ nginx or CloudFront must return `index.html` for all routes that do not match a 
 **Docker build (if using containers):**
 ```
 docker build --build-arg APP_NAME=shell -t mfe-shell:latest .
-docker build --build-arg APP_NAME=mfe-products -t mfe-products:latest .
-docker build --build-arg APP_NAME=mfe-orders -t mfe-orders:latest .
-docker build --build-arg APP_NAME=mfe-account -t mfe-account:latest .
+docker build --build-arg APP_NAME=mfeProducts -t mfe-products:latest .
+docker build --build-arg APP_NAME=mfeOrders -t mfe-orders:latest .
+docker build --build-arg APP_NAME=mfeAccount -t mfe-account:latest .
 ```
 
 **Environment variables (for ECS/EKS container deploy):**
-The shell container uses an entrypoint script that reads `MFE_PRODUCTS_URL`, `MFE_ORDERS_URL`, and `MFE_ACCOUNT_URL` to generate the manifest at startup.
+The shell container uses an entrypoint script that reads `MFE_PRODUCTS_URL`, `MFE_ORDERS_URL`, and `MFE_ACCOUNT_URL` to generate the mf-manifest.json format manifest at startup.

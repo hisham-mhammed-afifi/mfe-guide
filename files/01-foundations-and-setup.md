@@ -14,7 +14,7 @@ The user sees one website. Under the hood, that website is composed of multiple 
 
 ### What Is a Monorepo?
 
-A **monorepo** (short for "monolithic repository") is a single Git repository that contains multiple projects. Instead of having separate repositories for `shell`, `mfe-products`, `mfe-orders`, and `mfe-account`, all four live side by side in one repository.
+A **monorepo** (short for "monolithic repository") is a single Git repository that contains multiple projects. Instead of having separate repositories for `shell`, `mfeProducts`, `mfeOrders`, and `mfeAccount`, all four live side by side in one repository.
 
 Why? Because microfrontends that share libraries, models, and services need to stay in sync. A monorepo makes it easy to share code, run a single `npm install`, and ensure everyone uses the same Angular version. The alternative (separate repositories per MFE) creates significant coordination overhead for small-to-medium teams.
 
@@ -124,6 +124,8 @@ cd mfe-platform
 
 > **Note:** The `--nxCloud=skip` flag skips Nx Cloud setup. You can enable it later for remote caching. Nx Cloud stores build artifacts on a shared server. When a teammate (or CI) has already built a project, your machine downloads the cached result instead of rebuilding. This is optional and can be enabled later. The `apps` preset (as opposed to `angular-monorepo`) avoids generating any application upfront. (The `angular-monorepo` preset would generate a single Angular application automatically, which we do not want because we will generate the host with Module Federation wiring instead.)
 
+> **Note:** The `apps/` directory is created by the host generator in Step 3, not by the workspace preset.
+
 ### Step 2: Install the Angular Plugin
 
 ```bash
@@ -136,13 +138,29 @@ This single package installs Angular, Webpack, and all the Module Federation inf
 
 This is the key step. Nx's `@nx/angular:host` generator creates the shell application, generates all specified remotes, wires Module Federation config, configures routing, splits `main.ts`/`bootstrap.ts`, and creates the dynamic manifest. All in one command:
 
+> **Note:** If the generator fails with `The "@nx/angular:host" generator doesn't support the existing TypeScript setup`, set the following environment variable first:
+> ```bash
+> # Linux/macOS
+> export NX_IGNORE_UNSUPPORTED_TS_SETUP=true
+>
+> # Windows (PowerShell)
+> $env:NX_IGNORE_UNSUPPORTED_TS_SETUP="true"
+>
+> # Windows (CMD)
+> set NX_IGNORE_UNSUPPORTED_TS_SETUP=true
+> ```
+> This is needed because Nx 22 workspaces use TypeScript project references by default, which the Angular host generator does not fully support yet.
+
 ```bash
 npx nx g @nx/angular:host apps/shell \
-  --remotes=mfe-products,mfe-orders,mfe-account \
+  --remotes=mfeProducts,mfeOrders,mfeAccount \
   --dynamic \
   --prefix=app \
-  --style=scss
+  --style=scss \
+  --no-interactive
 ```
+
+> **Note:** Nx 22 does not allow hyphens in remote names. Remote names can only contain letters, digits, underscores, and dollar signs. This guide uses camelCase (`mfeProducts`) throughout. If you prefer underscores (`mfe_products`), that also works.
 
 Here is what each flag does:
 
@@ -153,19 +171,20 @@ Here is what each flag does:
 | `--dynamic` | Enables dynamic federation (manifest-based URL resolution) |
 | `--prefix=app` | HTML selector prefix for components (e.g., `<app-root>`) |
 | `--style=scss` | Use SCSS for stylesheets |
+| `--no-interactive` | Skip interactive prompts and use defaults |
 
 > **What `--dynamic` does behind the scenes:**
-> 1. Creates `module-federation.manifest.json` in the shell's `src/assets/` with localhost URLs for each remote.
+> 1. Creates `module-federation.manifest.json` in the shell's `public/` directory with localhost URLs for each remote.
 > 2. Generates `main.ts` that fetches the manifest, calls `registerRemotes()`, then imports `bootstrap.ts`.
 > 3. Generates `bootstrap.ts` with the actual `bootstrapApplication()` call.
 > 4. Configures routes in `app.routes.ts` using `loadRemote()` from `@module-federation/enhanced/runtime`.
-> 5. Keeps the remote names in `module-federation.config.ts` so Nx knows which remotes to auto-build during `nx serve`.
+> 5. Nx discovers which remotes belong to this host from the project graph during `nx serve`.
 
 > **What the generator does for each remote:**
 > 1. Creates a separate Angular application with its own `module-federation.config.ts`, `webpack.config.ts`, `main.ts`, and `bootstrap.ts`.
 > 2. Configures an `exposes` block pointing to `entry.routes.ts` (the federated entry point).
-> 3. Generates a placeholder `RemoteEntryComponent` and `entry.routes.ts`.
-> 4. Assigns unique ports: shell on 4200, mfe-products on 4201, mfe-orders on 4202, mfe-account on 4203.
+> 3. Generates a placeholder `RemoteEntry` component and `entry.routes.ts`.
+> 4. Assigns unique ports: shell on 4200, mfeProducts on 4201, mfeOrders on 4202, mfeAccount on 4203.
 > 5. Adds a lazy route to the shell's `app.routes.ts` for each remote.
 
 > **Note:** In Angular 21, `standalone: true` is the default for components and directives. You will not see `standalone: true` in any generated code or in this guide. If you see it in older tutorials, it is no longer necessary.
@@ -179,14 +198,16 @@ mfe-platform/
   apps/
     shell/                      # Host application (port 4200)
     shell-e2e/                  # End-to-end tests for the shell
-    mfe-products/               # Remote: product catalog (port 4201)
-    mfe-orders/                 # Remote: order management (port 4202)
-    mfe-account/                # Remote: user account (port 4203)
+    mfeProducts/                # Remote: product catalog (port 4201)
+    mfeOrders/                  # Remote: order management (port 4202)
+    mfeAccount/                 # Remote: user account (port 4203)
   libs/                         # Shared libraries (empty for now)
   nx.json                       # Nx workspace configuration
   tsconfig.base.json            # Shared TypeScript config
   package.json                  # Single dependency tree for all apps
 ```
+
+> **Note:** Each app also contains a `vite.config.mts` file for Vitest configuration. This is generated automatically and typically needs no changes.
 
 ### Step 5: Verify Nx and Angular Versions
 
@@ -202,7 +223,7 @@ Confirm you see `@nx/angular`, `@nx/module-federation`, and Angular 21.x in the 
 npx nx serve shell
 ```
 
-Navigate to `http://localhost:4200`. You should see the shell with navigation links. Clicking a link loads the remote's placeholder `RemoteEntryComponent` via Module Federation. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
+Navigate to `http://localhost:4200`. You should see the shell with navigation links. Clicking a link loads the remote's placeholder `RemoteEntry` component via Module Federation. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
 
 > **What just happened?**
 >

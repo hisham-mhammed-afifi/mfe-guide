@@ -23,7 +23,7 @@ This chapter is framed differently from the rest of the guide. As a frontend dev
 | module-federation.manifest.json format   | AWS infrastructure (S3, CloudFront, ECS)  |
 | Build commands: npx nx build <app>       | nginx configuration                       |
 | Output paths: dist/apps/<name>/browser   | CORS headers on CDN                       |
-| Cache-busting rules for remoteEntry.js   | SSL certificates and DNS                  |
+| Cache-busting rules for federation files | SSL certificates and DNS                  |
 | Environment-specific manifest URLs       | Container orchestration (ECS, EKS)        |
 +------------------------------------------+-------------------------------------------+
 ```
@@ -36,15 +36,15 @@ Every MFE (including the shell) produces a static build folder when you run:
 
 ```bash
 npx nx build shell --configuration=production
-npx nx build mfe-products --configuration=production
-npx nx build mfe-orders --configuration=production
-npx nx build mfe-account --configuration=production
+npx nx build mfeProducts --configuration=production
+npx nx build mfeOrders --configuration=production
+npx nx build mfeAccount --configuration=production
 ```
 
 The output for each app lands in `dist/apps/<name>/browser/` and contains:
 
 ```
-dist/apps/mfe-products/browser/
+dist/apps/mfeProducts/browser/
   index.html              # The SPA entry point
   main.[hash].js          # Application code (content-hashed filename)
   polyfills.[hash].js     # Browser polyfills (content-hashed)
@@ -55,29 +55,29 @@ dist/apps/mfe-products/browser/
 
 > **Warning:** `remoteEntry.js` is the file that Module Federation uses to discover what a remote exposes. Unlike other JS files, it is **not content-hashed**. Its filename stays the same across builds, but its contents change. This has critical implications for caching (covered below).
 
-> **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfe-products --configuration=production` and checking the output.
+> **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfeProducts --configuration=production` and checking the output.
 
 ### The Manifest File
 
-As we saw in Chapter 3, the manifest (`module-federation.manifest.json`) maps remote names to base URLs. Here is what the production version looks like. Share this explanation with your DevOps team:
+As we saw in Chapter 3, the manifest (`module-federation.manifest.json`) maps remote names to their `mf-manifest.json` URLs. Here is what the production version looks like. Share this explanation with your DevOps team:
 
 ```json
 {
-  "mfe-products": "https://products.mfe.example.com",
-  "mfe-orders": "https://orders.mfe.example.com",
-  "mfe-account": "https://account.mfe.example.com"
+  "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+  "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+  "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
 }
 ```
 
 - Each **key** is the remote's name (must match the `name` in the remote's `module-federation.config.ts`).
-- Each **value** is the base URL where the remote is hosted. The shell's `main.ts` appends `/remoteEntry.js` to fetch the federation entry point.
+- Each **value** is the full URL to the remote's `mf-manifest.json` file. This file describes what the remote exposes and what shared dependencies it needs.
 - This file must be **different per environment** (dev, staging, production). The shell is built once; only this file changes.
 
 ### CORS: Why It Matters for Microfrontends
 
 **CORS** (Cross-Origin Resource Sharing) is a browser security mechanism that blocks JavaScript from loading resources from a different domain unless the server explicitly allows it.
 
-In a microfrontend setup, the shell at `https://app.example.com` needs to fetch `remoteEntry.js` from `https://products.mfe.example.com`. Without CORS headers, the browser blocks this request.
+In a microfrontend setup, the shell at `https://app.example.com` needs to fetch `mf-manifest.json` from `https://products.mfe.example.com`. Without CORS headers, the browser blocks this request.
 
 **What to tell your DevOps team:** "Each remote's CDN (or server) must include these response headers for requests from the shell's origin":
 
@@ -116,7 +116,7 @@ RUN npm ci --ignore-scripts
 FROM deps AS builder
 WORKDIR /app
 COPY . .
-# APP_NAME is passed at build time (e.g., shell, mfe-products)
+# APP_NAME is passed at build time (e.g., shell, mfeProducts)
 ARG APP_NAME
 ARG CONFIGURATION=production
 RUN npx nx build ${APP_NAME} --configuration=${CONFIGURATION}
@@ -163,6 +163,12 @@ server {
         add_header Cache-Control "public, max-age=60";
     }
 
+    # Short cache for mf-manifest.json (changes on every deploy, not hashed)
+    location = /mf-manifest.json {
+        expires 60s;
+        add_header Cache-Control "public, max-age=60";
+    }
+
     # Cache hashed static assets aggressively (content-hashed by Webpack)
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
         expires 1y;
@@ -175,7 +181,7 @@ server {
 }
 ```
 
-> **Note:** The `location = /remoteEntry.js` (exact match) takes priority over the `location ~*` (regex match) in nginx. This means `remoteEntry.js` gets a 60-second cache while all other `.js` files get a 1-year cache.
+> **Note:** The `location = /remoteEntry.js` and `location = /mf-manifest.json` (exact match) blocks take priority over the `location ~*` (regex match) in nginx. This means `remoteEntry.js` and `mf-manifest.json` get a 60-second cache while all other `.js` files get a 1-year cache.
 
 ### docker-compose.yml (You Run This Yourself)
 
@@ -192,11 +198,12 @@ services:
     ports:
       - "4200:80"
 
+  # Docker service names use hyphens; APP_NAME must match the Nx project name (camelCase)
   mfe-products:
     build:
       context: .
       args:
-        APP_NAME: mfe-products
+        APP_NAME: mfeProducts
     ports:
       - "4201:80"
 
@@ -204,7 +211,7 @@ services:
     build:
       context: .
       args:
-        APP_NAME: mfe-orders
+        APP_NAME: mfeOrders
     ports:
       - "4202:80"
 
@@ -212,7 +219,7 @@ services:
     build:
       context: .
       args:
-        APP_NAME: mfe-account
+        APP_NAME: mfeAccount
     ports:
       - "4203:80"
 ```
@@ -262,11 +269,11 @@ ENV=${1:-prod}
 npx nx build shell --configuration=production
 
 # Overwrite manifest with environment-specific URLs
-cat > dist/apps/shell/browser/assets/module-federation.manifest.json << EOF
+cat > dist/apps/shell/browser/module-federation.manifest.json << EOF
 {
-  "mfe-products": "https://products.mfe.example.com",
-  "mfe-orders": "https://orders.mfe.example.com",
-  "mfe-account": "https://account.mfe.example.com"
+  "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+  "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+  "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
 }
 EOF
 
@@ -274,7 +281,7 @@ EOF
 aws s3 sync dist/apps/shell/browser s3://mfe-shell-${ENV} --delete
 aws cloudfront create-invalidation \
   --distribution-id ${CF_DIST_SHELL} \
-  --paths "/assets/module-federation.manifest.json" "/index.html"
+  --paths "/module-federation.manifest.json" "/index.html"
 ```
 
 **Approach B: Docker entrypoint (for ECS/EKS container deploy).** The container generates the manifest from environment variables at startup:
@@ -283,11 +290,11 @@ aws cloudfront create-invalidation \
 #!/bin/sh
 # docker/entrypoint.sh (share with DevOps)
 # Generate manifest from environment variables injected by ECS/EKS
-cat > /usr/share/nginx/html/assets/module-federation.manifest.json << EOF
+cat > /usr/share/nginx/html/module-federation.manifest.json << EOF
 {
-  "mfe-products": "${MFE_PRODUCTS_URL}",
-  "mfe-orders": "${MFE_ORDERS_URL}",
-  "mfe-account": "${MFE_ACCOUNT_URL}"
+  "mfeProducts": "${MFE_PRODUCTS_URL}/mf-manifest.json",
+  "mfeOrders": "${MFE_ORDERS_URL}/mf-manifest.json",
+  "mfeAccount": "${MFE_ACCOUNT_URL}/mf-manifest.json"
 }
 EOF
 
@@ -346,7 +353,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [shell, mfe-products, mfe-orders, mfe-account]
+        app: [shell, mfeProducts, mfeOrders, mfeAccount]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -379,11 +386,11 @@ jobs:
       - name: Inject manifest (shell only)
         if: steps.check.outputs.affected == 'true' && matrix.app == 'shell'
         run: |
-          cat > dist/apps/shell/browser/assets/module-federation.manifest.json << 'EOF'
+          cat > dist/apps/shell/browser/module-federation.manifest.json << 'EOF'
           {
-            "mfe-products": "https://products.mfe.example.com",
-            "mfe-orders": "https://orders.mfe.example.com",
-            "mfe-account": "https://account.mfe.example.com"
+            "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+            "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+            "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
           }
           EOF
 
@@ -408,7 +415,7 @@ jobs:
 - **Matrix strategy:** Each MFE is a parallel job. Only affected apps build and deploy.
 - **Manifest injection:** The shell gets its production manifest after the build, before S3 sync.
 - **`nrwl/nx-set-shas@v4`:** This GitHub Action sets the base and head Git SHAs that Nx uses to determine which projects were affected.
-- **CloudFront distribution IDs** should be stored as secrets: `CF_DIST_shell`, `CF_DIST_mfe-products`, etc.
+- **CloudFront distribution IDs** should be stored as secrets: `CF_DIST_shell`, `CF_DIST_mfeProducts`, etc.
 
 ### AWS Architecture Overview
 
@@ -448,24 +455,25 @@ Share this table with your DevOps team so they configure caching correctly:
 | Path Pattern | TTL | Why |
 |---|---|---|
 | `/remoteEntry.js` | 60 seconds | Changes on every deploy, not content-hashed |
+| `/mf-manifest.json` | 60 seconds | Federation manifest, changes on every deploy, not content-hashed |
 | `/*.js` (hashed chunks) | 1 year | Content-hashed filenames, immutable |
 | `/index.html` | 0 (always revalidate) | Points to latest hashed chunks |
 | `/assets/*` | 1 year | Immutable static assets |
 
-> **Warning:** If your DevOps team does not set a short TTL for `remoteEntry.js`, users may load a stale version after a deploy. The shell would try to load code that no longer exists, causing runtime errors.
+> **Warning:** If your DevOps team does not set a short TTL for `remoteEntry.js` and `mf-manifest.json`, users may load a stale version after a deploy. The shell would try to load code that no longer exists, causing runtime errors.
 
 ### Checklist: What to Tell Your DevOps Team
 
 Copy this into a Slack message or Jira ticket:
 
-- **Build commands:** `npx nx build <app-name> --configuration=production` for each of: `shell`, `mfe-products`, `mfe-orders`, `mfe-account`
+- **Build commands:** `npx nx build <app-name> --configuration=production` for each of: `shell`, `mfeProducts`, `mfeOrders`, `mfeAccount`
 - **Output directory:** `dist/apps/<app-name>/browser/` (contains `index.html`, JS chunks, CSS, assets)
-- **Manifest file:** `dist/apps/shell/browser/assets/module-federation.manifest.json` must be replaced with environment-specific URLs after building, before deploying
-- **Manifest format:** JSON object where keys are remote names and values are base URLs (no trailing slash)
+- **Manifest file:** `dist/apps/shell/browser/module-federation.manifest.json` must be replaced with environment-specific URLs after building, before deploying
+- **Manifest format:** JSON object where keys are remote names and values are full URLs to `mf-manifest.json`
 - **CORS requirement:** Each remote's CDN must set `Access-Control-Allow-Origin` to the shell's domain
-- **Cache-busting:** `remoteEntry.js` must have a short TTL (60s). All other `.js` and `.css` files are content-hashed and can be cached for 1 year. `index.html` should always revalidate
+- **Cache-busting:** `remoteEntry.js` and `mf-manifest.json` must have a short TTL (60s). All other `.js` and `.css` files are content-hashed and can be cached for 1 year. `index.html` should always revalidate
 - **SPA routing:** nginx (or CloudFront) must return `index.html` for all routes that do not match a file
-- **CloudFront invalidation:** After each deploy, invalidate at minimum `/index.html` and `/assets/module-federation.manifest.json`
+- **CloudFront invalidation:** After each deploy, invalidate at minimum `/index.html` and `/module-federation.manifest.json`
 
 With deployment artifacts ready for your DevOps team, let's look at how to keep shared dependency versions aligned. That's Chapter 12.
 
@@ -524,7 +532,7 @@ Each library and app has its own unit tests. Run them individually or for the wh
 npx nx test products-data-access
 
 # Test a specific app
-npx nx test mfe-products
+npx nx test mfeProducts
 
 # Test only projects affected by your changes
 npx nx affected -t test
@@ -640,14 +648,14 @@ First, add path aliases so the test can import remote entry files directly:
 {
   "compilerOptions": {
     "paths": {
-      "@mfe-platform/mfe-products/entry": [
-        "apps/mfe-products/src/app/remote-entry/entry.routes.ts"
+      "@mfe-platform/mfeProducts/entry": [
+        "apps/mfeProducts/src/app/remote-entry/entry.routes.ts"
       ],
-      "@mfe-platform/mfe-orders/entry": [
-        "apps/mfe-orders/src/app/remote-entry/entry.routes.ts"
+      "@mfe-platform/mfeOrders/entry": [
+        "apps/mfeOrders/src/app/remote-entry/entry.routes.ts"
       ],
-      "@mfe-platform/mfe-account/entry": [
-        "apps/mfe-account/src/app/remote-entry/entry.routes.ts"
+      "@mfe-platform/mfeAccount/entry": [
+        "apps/mfeAccount/src/app/remote-entry/entry.routes.ts"
       ]
     }
   }
@@ -661,8 +669,8 @@ Then write the contract tests:
 import { Route } from '@angular/router';
 
 describe('MFE Contract Tests', () => {
-  it('mfe-products exposes remoteRoutes as a non-empty array', async () => {
-    const mod = await import('@mfe-platform/mfe-products/entry');
+  it('mfeProducts exposes remoteRoutes as a non-empty array', async () => {
+    const mod = await import('@mfe-platform/mfeProducts/entry');
     // Verify the export exists and is an array with at least one route
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
@@ -671,21 +679,21 @@ describe('MFE Contract Tests', () => {
     expect(mod.remoteRoutes.find((r: Route) => r.path === '')).toBeDefined();
   });
 
-  it('mfe-orders exposes remoteRoutes as a non-empty array', async () => {
-    const mod = await import('@mfe-platform/mfe-orders/entry');
+  it('mfeOrders exposes remoteRoutes as a non-empty array', async () => {
+    const mod = await import('@mfe-platform/mfeOrders/entry');
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
   });
 
-  it('mfe-account exposes remoteRoutes as a non-empty array', async () => {
-    const mod = await import('@mfe-platform/mfe-account/entry');
+  it('mfeAccount exposes remoteRoutes as a non-empty array', async () => {
+    const mod = await import('@mfe-platform/mfeAccount/entry');
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
   });
 });
 ```
 
-> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx test shell`). Vitest resolves the `@mfe-platform/mfe-products/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). For that, use the Docker Compose integration tests above.
+> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx test shell`). Vitest resolves the `@mfe-platform/mfeProducts/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). For that, use the Docker Compose integration tests above.
 
 Now that the application is tested and deployment artifacts are ready for your DevOps team, let's look at advanced patterns and best practices. That's Chapter 14.
 

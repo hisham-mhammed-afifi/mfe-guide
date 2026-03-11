@@ -4,7 +4,7 @@
 
 ## Chapter 7: Building Features in Remotes
 
-Let's build out `mfe-products` with complete, compilable code. Every import is shown explicitly. No ellipsis, no "exercise for the reader."
+Let's build out `mfeProducts` with complete, compilable code. Every import is shown explicitly. No ellipsis, no "exercise for the reader."
 
 ### What Happens When a User Clicks "Products"
 
@@ -13,10 +13,10 @@ Here is the sequence of events when the user navigates to `/products` in the she
 ```
 1. User clicks "Products" link in the shell
 2. Angular router matches path "products" -> loadChildren
-3. loadRemote('mfe-products/Routes') is called
-4. Federation runtime looks up 'mfe-products' URL from registered remotes
-5. Browser fetches http://products.cdn.com/remoteEntry.js
-6. remoteEntry.js tells the runtime what the remote exposes and needs
+3. loadRemote('mfeProducts/Routes') is called
+4. Federation runtime looks up 'mfeProducts' URL from registered remotes
+5. Browser fetches http://products.cdn.com/mf-manifest.json
+6. mf-manifest.json tells the runtime what the remote exposes and needs
 7. Federation checks shared deps (@angular/core, rxjs, etc.) - already loaded
 8. Browser fetches the remote's main chunk (product feature code)
 9. Angular receives the route array and renders ProductListComponent
@@ -180,10 +180,10 @@ export { ProductDetailComponent } from './lib/product-detail.component';
 
 ### Step 6: Update Remote Entry Routes
 
-Replace the placeholder `RemoteEntryComponent` with real routes that use the feature library. The `RemoteEntryComponent` in `entry.component.ts` is no longer referenced. You can safely delete that file.
+Replace the placeholder `RemoteEntry` component with real routes that use the feature library. The `RemoteEntry` component in `entry.ts` is no longer referenced. You can safely delete that file.
 
 ```typescript
-// apps/mfe-products/src/app/remote-entry/entry.routes.ts
+// apps/mfeProducts/src/app/remote-entry/entry.routes.ts
 import { Route } from '@angular/router';
 
 export const remoteRoutes: Route[] = [
@@ -208,7 +208,7 @@ export const remoteRoutes: Route[] = [
 ### Step 7: Run Standalone
 
 ```bash
-npx nx serve mfe-products
+npx nx serve mfeProducts
 ```
 
 Navigate to `http://localhost:4201`. The products feature runs independently using its own `bootstrap.ts` and `app.config.ts` (with providers). This is useful for focused development without starting the full system.
@@ -219,7 +219,7 @@ Navigate to `http://localhost:4201`. The products feature runs independently usi
 npx nx serve shell
 ```
 
-Navigate to `http://localhost:4200/mfe-products`. The shell loads the products remote via Module Federation. You should see the product list rendered inside the shell's layout.
+Navigate to `http://localhost:4200/products`. The shell loads the products remote via Module Federation. You should see the product list rendered inside the shell's layout.
 
 > **What just happened?**
 >
@@ -257,15 +257,15 @@ Nx reads the `remotes` array in the shell's `module-federation.config.ts` to dis
 ### Developing a Specific Remote
 
 ```bash
-npx nx serve shell --devRemotes=mfe-products
+npx nx serve shell --devRemotes=mfeProducts
 ```
 
-Changes to `mfe-products` source files trigger HMR instantly. `mfe-orders` and `mfe-account` are served as static builds.
+Changes to `mfeProducts` source files trigger HMR instantly. `mfeOrders` and `mfeAccount` are served as static builds.
 
 ### Working on Multiple Remotes
 
 ```bash
-npx nx serve shell --devRemotes=mfe-products,mfe-orders
+npx nx serve shell --devRemotes=mfeProducts,mfeOrders
 ```
 
 > **Warning:** Each dev remote runs its own `webpack-dev-server`, consuming 1-2 GB of RAM. Running 4+ dev remotes simultaneously can consume 8+ GB. Only use `--devRemotes` for the remotes you are actively editing.
@@ -274,9 +274,9 @@ npx nx serve shell --devRemotes=mfe-products,mfe-orders
 
 If clicking a remote link shows a blank page or a loading error:
 
-1. Check that the `remotes` array in `apps/shell/module-federation.config.ts` lists all remote names.
+1. Nx discovers remotes from the project graph. Verify that all remote projects were generated with `--host=shell` or were listed in the original `--remotes` flag.
 2. Check that `module-federation.manifest.json` has the correct localhost URLs.
-3. Open the browser DevTools Network tab and look for failed requests to `remoteEntry.js`.
+3. Open the browser DevTools Network tab and look for failed requests to `mf-manifest.json` or `remoteEntry.js`.
 
 Now that the development workflow is clear, let's look at how microfrontends communicate with each other. That's Chapter 9.
 
@@ -293,8 +293,8 @@ Since Angular runs as a singleton, `@Injectable({ providedIn: 'root' })` service
 export class AuthService { /* ... */ }
 
 // Shell:        inject(AuthService)  -> Instance A
-// mfe-products: inject(AuthService)  -> Same Instance A
-// mfe-orders:   inject(AuthService)  -> Same Instance A
+// mfeProducts: inject(AuthService)  -> Same Instance A
+// mfeOrders:   inject(AuthService)  -> Same Instance A
 ```
 
 This is the safest and most debuggable approach for cross-MFE state. As we saw in Chapter 4, the `AuthService` uses signals internally, and every MFE reads the same signal values because they share the same service instance.
@@ -322,12 +322,12 @@ export const isAuthenticated = computed(() => currentUser() !== null);
 For loose notifications between microfrontends that do not need request-response patterns:
 
 ```typescript
-// Dispatch from mfe-products (e.g., when user adds item to cart)
+// Dispatch from mfeProducts (e.g., when user adds item to cart)
 window.dispatchEvent(new CustomEvent('cart:add', {
   detail: { productId: '123', qty: 1 },
 }));
 
-// Listen in mfe-orders (e.g., to update cart badge count)
+// Listen in mfeOrders (e.g., to update cart badge count)
 window.addEventListener('cart:add', ((e: CustomEvent) => {
   console.log('Item added:', e.detail);
 }) as EventListener);
