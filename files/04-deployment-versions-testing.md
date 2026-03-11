@@ -2,53 +2,111 @@
 
 ---
 
-## Chapter 11: CI/CD and Deployment on AWS with Docker
+## Chapter 11: What Your DevOps Team Needs From You
 
-### Deployment Architecture on AWS
+This chapter is framed differently from the rest of the guide. As a frontend developer, you are not expected to write or maintain Dockerfiles, CI pipelines, or AWS infrastructure. A separate DevOps team handles that. However, you need to understand these artifacts well enough to:
 
-Each MFE is a static Angular build served from its own S3 bucket behind CloudFront. The shell loads remotes at runtime via the manifest. Each app has its own CI pipeline, Docker build stage, and deploy step.
+- Explain what each MFE produces (a static build folder).
+- Provide DevOps with the correct build commands and output paths.
+- Explain the manifest file and why it must be swapped per environment.
+- Understand CORS and cache-busting requirements.
+- Run `docker compose up` locally for integration testing.
+
+### Responsibility Boundary
 
 ```
-                         +-----------------------+
-                         |   Route 53 (DNS)      |
-                         |   app.example.com     |
-                         +----------+------------+
-                                    |
-                         +----------v------------+
-                         |  CloudFront (Shell)   |
-                         |  S3: shell-bucket     |
-                         +----------+------------+
-                                    |
-        manifest.json resolves remotes at runtime
-                                    |
-          +-------------------------+-------------------------+
-          |                         |                         |
-+---------v----------+  +-----------v--------+  +-------------v------+
-| CloudFront (Prods) |  | CloudFront (Orders)|  | CloudFront (Acct)  |
-| S3: products-bucket|  | S3: orders-bucket  |  | S3: account-bucket |
-+--------------------+  +--------------------+  +--------------------+
++------------------------------------------+-------------------------------------------+
+|         Frontend Team Owns               |          DevOps Team Owns                 |
++------------------------------------------+-------------------------------------------+
+| Source code (apps/ and libs/)            | Dockerfiles and Docker Compose            |
+| module-federation.config.ts              | CI/CD pipeline (GitHub Actions, etc.)     |
+| module-federation.manifest.json format   | AWS infrastructure (S3, CloudFront, ECS)  |
+| Build commands: npx nx build <app>       | nginx configuration                       |
+| Output paths: dist/apps/<name>/browser   | CORS headers on CDN                       |
+| Cache-busting rules for remoteEntry.js   | SSL certificates and DNS                  |
+| Environment-specific manifest URLs       | Container orchestration (ECS, EKS)        |
++------------------------------------------+-------------------------------------------+
 ```
 
-| Application | S3 Bucket | CloudFront Distribution | Domain |
-|---|---|---|---|
-| shell | `mfe-shell-{env}` | `EXXXSHELL` | `app.example.com` |
-| mfe-products | `mfe-products-{env}` | `EXXXPRODUCTS` | `products.mfe.example.com` |
-| mfe-orders | `mfe-orders-{env}` | `EXXXORDERS` | `orders.mfe.example.com` |
-| mfe-account | `mfe-account-{env}` | `EXXXACCOUNT` | `account.mfe.example.com` |
+The sections below provide **ready-to-hand-off artifacts** with explanations. You should understand what each file does, but you are not expected to author or maintain them.
 
-### Dockerized Build
+### What Each MFE Produces
 
-Each MFE uses a multi-stage Docker build: Node for building, nginx for serving. Even though the final deployment goes to S3, Docker provides a consistent, reproducible build environment across CI agents and local machines.
+Every MFE (including the shell) produces a static build folder when you run:
 
-#### Shared Base Dockerfile (workspace root)
+```bash
+npx nx build shell --configuration=production
+npx nx build mfe-products --configuration=production
+npx nx build mfe-orders --configuration=production
+npx nx build mfe-account --configuration=production
+```
+
+The output for each app lands in `dist/apps/<name>/browser/` and contains:
+
+```
+dist/apps/mfe-products/browser/
+  index.html              # The SPA entry point
+  main.[hash].js          # Application code (content-hashed filename)
+  polyfills.[hash].js     # Browser polyfills (content-hashed)
+  remoteEntry.js          # Module Federation entry (NOT hashed)
+  styles.[hash].css       # Compiled stylesheets
+  assets/                 # Static assets
+```
+
+> **Warning:** `remoteEntry.js` is the file that Module Federation uses to discover what a remote exposes. Unlike other JS files, it is **not content-hashed**. Its filename stays the same across builds, but its contents change. This has critical implications for caching (covered below).
+
+> **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfe-products --configuration=production` and checking the output.
+
+### The Manifest File
+
+As we saw in Chapter 3, the manifest (`module-federation.manifest.json`) maps remote names to base URLs. Here is what the production version looks like. Share this explanation with your DevOps team:
+
+```json
+{
+  "mfe-products": "https://products.mfe.example.com",
+  "mfe-orders": "https://orders.mfe.example.com",
+  "mfe-account": "https://account.mfe.example.com"
+}
+```
+
+- Each **key** is the remote's name (must match the `name` in the remote's `module-federation.config.ts`).
+- Each **value** is the base URL where the remote is hosted. The shell's `main.ts` appends `/remoteEntry.js` to fetch the federation entry point.
+- This file must be **different per environment** (dev, staging, production). The shell is built once; only this file changes.
+
+### CORS: Why It Matters for Microfrontends
+
+**CORS** (Cross-Origin Resource Sharing) is a browser security mechanism that blocks JavaScript from loading resources from a different domain unless the server explicitly allows it.
+
+In a microfrontend setup, the shell at `https://app.example.com` needs to fetch `remoteEntry.js` from `https://products.mfe.example.com`. Without CORS headers, the browser blocks this request.
+
+**What to tell your DevOps team:** "Each remote's CDN (or server) must include these response headers for requests from the shell's origin":
+
+```
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: GET, OPTIONS
+```
+
+### Docker Multi-Stage Build (Reference Artifact)
+
+Share this Dockerfile with your DevOps team. It builds any MFE in the workspace using a build argument.
+
+```
+  +---------------+     +---------------+     +----------------+
+  |  Stage 1:     |     |  Stage 2:     |     |  Stage 3:      |
+  |  deps         | --> |  builder      | --> |  server         |
+  |  npm ci       |     |  nx build     |     |  nginx (~25MB) |
+  |  (cached)     |     |  (one app)    |     |  (static only) |
+  +---------------+     +---------------+     +----------------+
+```
 
 ```dockerfile
-# Dockerfile
+# Dockerfile (workspace root)
 # ============================================
 # Stage 1: Install dependencies (cached layer)
 # ============================================
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
+# Copy only package files first so npm ci is cached when source changes
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
@@ -58,27 +116,31 @@ RUN npm ci --ignore-scripts
 FROM deps AS builder
 WORKDIR /app
 COPY . .
+# APP_NAME is passed at build time (e.g., shell, mfe-products)
 ARG APP_NAME
 ARG CONFIGURATION=production
 RUN npx nx build ${APP_NAME} --configuration=${CONFIGURATION}
 
 # ============================================
-# Stage 3: Serve with nginx (for Docker-based deploy or local testing)
+# Stage 3: Serve with nginx (tiny ~25 MB image)
 # ============================================
-FROM nginx:1.27-alpine AS server
+FROM nginx:1.28-alpine AS server
 ARG APP_NAME
+# Copy only the built static files into the nginx html directory
 COPY --from=builder /app/dist/apps/${APP_NAME}/browser /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-> **Why multi-stage?**
-> - `deps` stage is cached. As long as `package.json` doesn't change, `npm ci` is skipped on rebuilds.
-> - `builder` receives the full workspace and builds only the requested app via `ARG APP_NAME`.
-> - `server` produces a tiny nginx image (~25 MB) with only the static output.
+**How it works in plain English:**
+- **Stage 1 (deps):** Installs npm packages. This layer is cached. As long as `package.json` does not change, `npm ci` is skipped on rebuilds.
+- **Stage 2 (builder):** Copies the full workspace and builds only the requested app via the `APP_NAME` argument.
+- **Stage 3 (server):** Copies the static build output into a tiny nginx image. The final image contains only HTML, JS, CSS, and nginx. No Node.js, no source code.
 
-#### nginx.conf for SPA Routing
+### nginx.conf (Reference Artifact)
+
+Share this nginx configuration with your DevOps team:
 
 ```nginx
 # docker/nginx.conf
@@ -88,39 +150,36 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # SPA fallback
+    # SPA fallback: any route that doesn't match a file serves index.html
+    # (SPA = Single Page Application: one HTML page, JS handles navigation)
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    # Cache static assets aggressively (content-hashed by Webpack)
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Short cache for remoteEntry.js (changes on every deploy)
+    # Short cache for remoteEntry.js (changes on every deploy, not hashed)
+    # Exact-match location takes priority over the regex rule below
     location = /remoteEntry.js {
         expires 60s;
         add_header Cache-Control "public, max-age=60";
     }
 
-    # CORS (used when served from Docker; CloudFront handles CORS in prod)
+    # Cache hashed static assets aggressively (content-hashed by Webpack)
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # CORS headers (for Docker-based serving; CloudFront handles CORS in prod)
     add_header Access-Control-Allow-Origin *;
     add_header Access-Control-Allow-Methods "GET, OPTIONS";
 }
 ```
 
-#### Building Each MFE
+> **Note:** The `location = /remoteEntry.js` (exact match) takes priority over the `location ~*` (regex match) in nginx. This means `remoteEntry.js` gets a 60-second cache while all other `.js` files get a 1-year cache.
 
-```bash
-docker build --build-arg APP_NAME=shell -t mfe-shell:latest .
-docker build --build-arg APP_NAME=mfe-products -t mfe-products:latest .
-docker build --build-arg APP_NAME=mfe-orders -t mfe-orders:latest .
-docker build --build-arg APP_NAME=mfe-account -t mfe-account:latest .
-```
+### docker-compose.yml (You Run This Yourself)
 
-#### docker-compose.yml (Full System Local Test)
+This is the one Docker artifact you run locally for integration testing. It starts all four MFEs in production-like containers:
 
 ```yaml
 # docker-compose.yml
@@ -159,26 +218,50 @@ services:
 ```
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
+
+The `--build` flag forces Docker to rebuild the images (instead of using a previous build). The `-d` flag means "detached," which runs the containers in the background so you get your terminal back. Without `-d`, the terminal would show live container logs and you would need a second terminal to run tests.
 
 Navigate to `http://localhost:4200`. The shell loads remotes from `localhost:4201-4203` via the dev manifest. This is a production-like integration test using real nginx and real Module Federation.
 
-### Injecting the Manifest per Environment
+After adding Docker files, your workspace root looks like this:
 
-The shell is built once; the manifest is swapped at deploy time.
+```
+mfe-platform/
+  apps/
+  libs/
+  docker/
+    nginx.conf              # nginx config (shared with DevOps)
+    entrypoint.sh           # ECS manifest injection (shared with DevOps)
+  Dockerfile                # Multi-stage build (shared with DevOps)
+  docker-compose.yml        # Local integration testing (you run this)
+  nx.json
+  package.json
+```
 
-#### Approach A: Replace the File Before S3 Sync (For S3+CloudFront)
+> **What just happened?**
+>
+> - [x] Built all four MFEs inside Docker containers
+> - [x] Each container runs nginx serving the static build output
+> - [x] The shell loads remotes over HTTP, just like production
+> - [x] You can verify cross-MFE routing, shared services, and style isolation
+
+### Manifest Injection: Two Approaches
+
+The shell is built once. The manifest is swapped at deploy time. There are two approaches.
+
+**Approach A: File replacement before S3 sync (for S3 + CloudFront).** Your DevOps team replaces the manifest file after building, before uploading to S3:
 
 ```bash
 #!/bin/bash
-# scripts/deploy-shell.sh
+# scripts/deploy-shell.sh (share with DevOps)
 ENV=${1:-prod}
 
 # Build (or use cached artifact)
 npx nx build shell --configuration=production
 
-# Overwrite manifest
+# Overwrite manifest with environment-specific URLs
 cat > dist/apps/shell/browser/assets/module-federation.manifest.json << EOF
 {
   "mfe-products": "https://products.mfe.example.com",
@@ -187,22 +270,19 @@ cat > dist/apps/shell/browser/assets/module-federation.manifest.json << EOF
 }
 EOF
 
-# Sync to S3
+# Sync to S3 and invalidate CloudFront cache
 aws s3 sync dist/apps/shell/browser s3://mfe-shell-${ENV} --delete
-
-# Invalidate CloudFront (manifest + index.html)
 aws cloudfront create-invalidation \
   --distribution-id ${CF_DIST_SHELL} \
   --paths "/assets/module-federation.manifest.json" "/index.html"
 ```
 
-#### Approach B: Docker Entrypoint (For ECS/EKS Container Deploy)
-
-For teams deploying the shell as a Docker container on ECS Fargate or EKS:
+**Approach B: Docker entrypoint (for ECS/EKS container deploy).** The container generates the manifest from environment variables at startup:
 
 ```bash
 #!/bin/sh
-# docker/entrypoint.sh
+# docker/entrypoint.sh (share with DevOps)
+# Generate manifest from environment variables injected by ECS/EKS
 cat > /usr/share/nginx/html/assets/module-federation.manifest.json << EOF
 {
   "mfe-products": "${MFE_PRODUCTS_URL}",
@@ -214,35 +294,22 @@ EOF
 exec nginx -g "daemon off;"
 ```
 
-Update the Dockerfile server stage:
+In ECS, these environment variables come from the **task definition** (a JSON configuration that tells ECS how to run a container). In EKS (Kubernetes), they come from a **ConfigMap** (a Kubernetes resource that stores configuration as key-value pairs).
 
-```dockerfile
-FROM nginx:1.27-alpine AS server
-ARG APP_NAME
-COPY --from=builder /app/dist/apps/${APP_NAME}/browser /usr/share/nginx/html
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-EXPOSE 80
-ENTRYPOINT ["/entrypoint.sh"]
+### CI/CD Pipeline (Reference for DevOps)
+
+Your DevOps team can adapt this GitHub Actions pipeline:
+
 ```
-
-Run with env vars:
-
-```bash
-docker run -p 4200:80 \
-  -e MFE_PRODUCTS_URL=https://products.mfe.example.com \
-  -e MFE_ORDERS_URL=https://orders.mfe.example.com \
-  -e MFE_ACCOUNT_URL=https://account.mfe.example.com \
-  mfe-shell:latest
+  +------------+     +-------------+     +-----------+     +----------+
+  | checkout   | --> | npm ci      | --> | nx        | --> | deploy   |
+  | full       |     | + set SHAs  |     | affected  |     | to S3 +  |
+  | history    |     |             |     | lint/test |     | CF inv.  |
+  +------------+     +-------------+     +-----------+     +----------+
 ```
-
-In ECS, these env vars come from the task definition. In EKS, from a ConfigMap or Secret.
-
-### CI Pipeline: GitHub Actions with Docker + AWS
 
 ```yaml
-# .github/workflows/ci-deploy.yml
+# .github/workflows/ci-deploy.yml (share with DevOps)
 name: CI & Deploy
 on:
   push:
@@ -261,14 +328,15 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
+          fetch-depth: 0   # Full history needed for nx affected
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
       - run: npm ci
+      # Sets base/head SHAs for affected detection
       - uses: nrwl/nx-set-shas@v4
       - run: npx nx affected -t lint test build
 
@@ -280,19 +348,23 @@ jobs:
       matrix:
         app: [shell, mfe-products, mfe-orders, mfe-account]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
       - run: npm ci
       - uses: nrwl/nx-set-shas@v4
 
+      # Only deploy if this app was affected by the change
       - name: Check if affected
         id: check
         run: |
+          # nx show projects --affected --type=app: lists apps changed by this PR/push
+          # grep -q "^...$": silently checks if the current matrix app is in that list
+          # -q means "quiet" (no output, just exit code), ^ and $ are regex anchors for exact match
           if npx nx show projects --affected --type=app | grep -q "^${{ matrix.app }}$"; then
             echo "affected=true" >> $GITHUB_OUTPUT
           else
@@ -303,6 +375,7 @@ jobs:
         if: steps.check.outputs.affected == 'true'
         run: npx nx build ${{ matrix.app }} --configuration=production
 
+      # Inject production manifest into shell build
       - name: Inject manifest (shell only)
         if: steps.check.outputs.affected == 'true' && matrix.app == 'shell'
         run: |
@@ -314,9 +387,10 @@ jobs:
           }
           EOF
 
+      # OIDC = OpenID Connect: secure auth without static passwords
       - name: Configure AWS credentials (OIDC)
         if: steps.check.outputs.affected == 'true'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::123456789012:role/github-deploy-role
           aws-region: ${{ env.AWS_REGION }}
@@ -330,77 +404,70 @@ jobs:
           aws cloudfront create-invalidation --distribution-id ${DIST_ID} --paths "/*"
 ```
 
-> **Key aspects:**
-> - **Matrix strategy:** Each MFE is a parallel job. Only affected apps build and deploy.
-> - **OIDC auth:** Uses role assumption instead of static AWS keys.
-> - **Manifest injection:** Shell gets its production manifest after build, before S3 sync.
-> - **CloudFront IDs** stored as secrets: `CF_DIST_shell`, `CF_DIST_mfe-products`, etc.
+**Key aspects your DevOps team should know:**
+- **Matrix strategy:** Each MFE is a parallel job. Only affected apps build and deploy.
+- **Manifest injection:** The shell gets its production manifest after the build, before S3 sync.
+- **`nrwl/nx-set-shas@v4`:** This GitHub Action sets the base and head Git SHAs that Nx uses to determine which projects were affected.
+- **CloudFront distribution IDs** should be stored as secrets: `CF_DIST_shell`, `CF_DIST_mfe-products`, etc.
 
-### CloudFront CORS (Response Headers Policy)
+### AWS Architecture Overview
 
-Each remote's distribution needs a response headers policy:
+There are two common deployment models. Your DevOps team chooses which one fits your organization.
 
-```json
-{
-  "CORSConfig": {
-    "AccessControlAllowOrigins": { "Items": ["https://app.example.com"] },
-    "AccessControlAllowMethods": { "Items": ["GET", "OPTIONS"] },
-    "AccessControlAllowHeaders": { "Items": ["*"] },
-    "AccessControlMaxAgeSec": 86400,
-    "OriginOverride": true
-  }
-}
+```
+                         +-----------------------+
+                         |   Route 53 (DNS)      |
+                         |   app.example.com     |
+                         +----------+------------+
+                                    |
+                         +----------v------------+
+                         |  CloudFront (Shell)   |
+                         |  S3: shell-bucket     |
+                         +----------+------------+
+                                    |
+        manifest.json resolves remotes at runtime
+                                    |
+          +-------------------------+-------------------------+
+          |                         |                         |
++---------v----------+  +-----------v--------+  +-------------v------+
+| CloudFront (Prods) |  | CloudFront (Orders)|  | CloudFront (Acct)  |
+| S3: products-bucket|  | S3: orders-bucket  |  | S3: account-bucket |
++--------------------+  +--------------------+  +--------------------+
 ```
 
-> S3 does not need separate CORS if CloudFront is the only origin.
+**S3 + CloudFront (static hosting):** Each MFE's build output is uploaded to an **S3 bucket** (Amazon's object storage, like a file server in the cloud). **CloudFront** (Amazon's CDN) sits in front of S3 and caches files at edge locations worldwide for fast delivery. This is simpler, cheaper, and faster for static sites.
+
+**ECS + Fargate (container hosting):** Each MFE runs as a Docker container on **ECS** (Elastic Container Service, Amazon's container orchestration platform). **Fargate** is the serverless compute engine for ECS. **ECR** (Elastic Container Registry) stores your Docker images. This approach makes sense if you need server-side rendering or dynamic manifest injection at container startup.
+
+For most Angular MFE setups, **S3 + CloudFront is the recommended approach** because the output is static HTML/JS/CSS.
 
 ### CloudFront Cache Behaviors
 
-| Path Pattern | TTL | Notes |
+Share this table with your DevOps team so they configure caching correctly:
+
+| Path Pattern | TTL | Why |
 |---|---|---|
-| `/remoteEntry.js` | 60 seconds | Changes on every deploy |
-| `/*.js` (hashed chunks) | 1 year | Content-hashed, immutable |
-| `/index.html` | 0 (revalidate) | Points to latest chunks |
-| `/assets/*` | 1 year | Immutable |
+| `/remoteEntry.js` | 60 seconds | Changes on every deploy, not content-hashed |
+| `/*.js` (hashed chunks) | 1 year | Content-hashed filenames, immutable |
+| `/index.html` | 0 (always revalidate) | Points to latest hashed chunks |
+| `/assets/*` | 1 year | Immutable static assets |
 
-### ECR + ECS Alternative
+> **Warning:** If your DevOps team does not set a short TTL for `remoteEntry.js`, users may load a stale version after a deploy. The shell would try to load code that no longer exists, causing runtime errors.
 
-For teams running MFEs as containers on ECS Fargate:
+### Checklist: What to Tell Your DevOps Team
 
-```bash
-# Push to ECR
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+Copy this into a Slack message or Jira ticket:
 
-docker tag mfe-shell:latest \
-  123456789012.dkr.ecr.us-east-1.amazonaws.com/mfe-shell:latest
-docker push \
-  123456789012.dkr.ecr.us-east-1.amazonaws.com/mfe-shell:latest
+- **Build commands:** `npx nx build <app-name> --configuration=production` for each of: `shell`, `mfe-products`, `mfe-orders`, `mfe-account`
+- **Output directory:** `dist/apps/<app-name>/browser/` (contains `index.html`, JS chunks, CSS, assets)
+- **Manifest file:** `dist/apps/shell/browser/assets/module-federation.manifest.json` must be replaced with environment-specific URLs after building, before deploying
+- **Manifest format:** JSON object where keys are remote names and values are base URLs (no trailing slash)
+- **CORS requirement:** Each remote's CDN must set `Access-Control-Allow-Origin` to the shell's domain
+- **Cache-busting:** `remoteEntry.js` must have a short TTL (60s). All other `.js` and `.css` files are content-hashed and can be cached for 1 year. `index.html` should always revalidate
+- **SPA routing:** nginx (or CloudFront) must return `index.html` for all routes that do not match a file
+- **CloudFront invalidation:** After each deploy, invalidate at minimum `/index.html` and `/assets/module-federation.manifest.json`
 
-aws ecs update-service \
-  --cluster mfe-cluster \
-  --service shell-service \
-  --force-new-deployment
-```
-
-ECS task definition passes manifest URLs as environment variables (consumed by the entrypoint script):
-
-```json
-{
-  "containerDefinitions": [{
-    "name": "shell",
-    "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/mfe-shell:latest",
-    "portMappings": [{ "containerPort": 80 }],
-    "environment": [
-      { "name": "MFE_PRODUCTS_URL", "value": "https://products.mfe.example.com" },
-      { "name": "MFE_ORDERS_URL", "value": "https://orders.mfe.example.com" },
-      { "name": "MFE_ACCOUNT_URL", "value": "https://account.mfe.example.com" }
-    ]
-  }]
-}
-```
-
-> **S3+CloudFront vs. ECS:** For pure static MFEs, S3+CloudFront is simpler, cheaper, and faster (no servers to manage, global edge caching). ECS makes sense if you need SSR, dynamic manifest injection at container startup, or your org standardizes on container deployments.
+With deployment artifacts ready for your DevOps team, let's look at how to keep shared dependency versions aligned. That's Chapter 12.
 
 ---
 
@@ -408,90 +475,209 @@ ECS task definition passes manifest URLs as environment variables (consumed by t
 
 ### The Version Problem
 
-Independently deployed remotes may be built with different versions of shared dependencies. Module Federation handles this through version negotiation at runtime: when multiple versions of a shared singleton are available, it picks the highest semver-compatible version.
+Independently deployed remotes may be built at different times with different versions of shared dependencies. For example, the shell might use `@angular/core@21.1.0` while a remote was built with `@angular/core@21.0.0`.
+
+Module Federation handles this through **version negotiation** at runtime: when multiple versions of a shared singleton are available, it picks the highest semver-compatible version. **Semver-compatible** means versions that share the same major number. For example, `21.0.0` and `21.1.0` are compatible (same major version 21). But `21.1.0` and `22.0.0` are NOT compatible (different major versions). Module Federation loads the highest version within the compatible range. If both `21.0.0` and `21.1.0` are available, it picks `21.1.0`.
 
 ### Nx's Default Strategy
 
-`withModuleFederation` configures shared deps with:
+The `withModuleFederation` helper configures shared deps with:
 
-- **`singleton: true`** for Angular core packages (one instance of Angular).
-- **`strictVersion: true`** for critical packages. This produces a **console warning** (not a crash) like `Unsatisfied version X of shared singleton module Y`. The app continues loading, but behavior may be unpredictable.
+- **`singleton: true`** for Angular core packages (only one instance of Angular can run).
+- **`strictVersion: true`** for critical packages. This produces a **console warning** (not a crash) like `Unsatisfied version X of shared singleton module Y`.
 - **`requiredVersion: 'auto'`** reads the version from `package.json`.
 
-> **`strictVersion` does NOT throw a JavaScript error.** It only logs a warning. Version mismatches can sneak into production unnoticed. Always check for these warnings in integration tests.
+> **Warning:** `strictVersion` does NOT throw a JavaScript error. It only logs a warning. The app continues running, but behavior may be unpredictable. Version mismatches can sneak into production unnoticed. Always check for these warnings in integration tests.
 
 ### Keeping Versions Aligned
 
+Since all apps share one `package.json` in the monorepo, versions stay aligned naturally. Run migrations regularly:
+
 ```bash
-nx migrate latest
+npx nx migrate latest
 npm install
-nx migrate --run-migrations
+npx nx migrate --run-migrations
 ```
 
-After migration, rebuild and redeploy all affected apps.
+After migration, rebuild and redeploy all affected apps to ensure no version drift between deployed builds.
 
 ### Detecting Drift
 
-- Run integration tests (Docker Compose) that load all remotes in the shell.
-- Check the browser Network tab for duplicate `@angular/core` chunks.
-- Check the console for `Unsatisfied version` warnings.
+- Run integration tests with Docker Compose (as described in Chapter 11) that load all remotes in the shell.
+- Open the browser DevTools Network tab and filter for `@angular/core`. If you see more than one chunk, sharing is broken.
+- Check the browser console for `Unsatisfied version` warnings.
+
+Now let's look at how to test the composed system effectively. That's Chapter 13.
 
 ---
 
 ## Chapter 13: Testing Strategy
 
+> **Note:** Angular 21 made Vitest the default test runner, replacing Karma/Jasmine. Nx 22.3+ supports Vitest for Angular projects via the `vitest-angular` option (using Angular's native `@angular/build:unit-test` builder). All test files use the standard `.spec.ts` extension. The `nx test` command runs Vitest in watch mode by default during local development and in single-run mode in CI (when the `CI` environment variable is set). Angular's `TestBed`, `HttpTestingController`, and other testing utilities work the same way with Vitest as they did with previous test runners.
+
 ### Unit Testing
 
-```bash
-nx test mfe-products
-nx test shared-data-access-auth
-nx test shared-ui
-```
-
-### Affected Testing in CI
+Each library and app has its own unit tests. Run them individually or for the whole workspace:
 
 ```bash
-nx affected -t test
+# Test a specific library
+npx nx test products-data-access
+
+# Test a specific app
+npx nx test mfe-products
+
+# Test only projects affected by your changes
+npx nx affected -t test
 ```
+
+Vitest output uses a tree format with checkmarks:
+
+```
+ ✓ products-data-access src/lib/product.service.spec.ts (2 tests) 145ms
+   ✓ ProductService (2)
+     ✓ should fetch all products 85ms
+     ✓ should fetch a product by ID 42ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  10:42:15
+   Duration  1.28s
+```
+
+Here is a sample unit test for `ProductService` using `TestBed` and `HttpTestingController`:
+
+```typescript
+// libs/products/data-access/src/lib/product.service.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import {
+  provideHttpClientTesting,
+  HttpTestingController,
+} from '@angular/common/http/testing';
+import { ProductService } from './product.service';
+
+describe('ProductService', () => {
+  let service: ProductService;
+  let httpTesting: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
+    });
+    service = TestBed.inject(ProductService);
+    httpTesting = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    httpTesting.verify(); // Ensure no outstanding requests
+  });
+
+  it('should fetch all products', () => {
+    const mockProducts = [
+      { id: '1', name: 'Widget', description: 'A widget', price: 9.99, imageUrl: '' },
+    ];
+
+    service.getAll().subscribe((products) => {
+      expect(products).toEqual(mockProducts);
+    });
+
+    const req = httpTesting.expectOne('/api/products');
+    expect(req.request.method).toBe('GET');
+    req.flush(mockProducts);
+  });
+
+  it('should fetch a product by ID', () => {
+    const mockProduct = {
+      id: '1', name: 'Widget', description: 'A widget', price: 9.99, imageUrl: '',
+    };
+
+    service.getById('1').subscribe((product) => {
+      expect(product).toEqual(mockProduct);
+    });
+
+    const req = httpTesting.expectOne('/api/products/1');
+    expect(req.request.method).toBe('GET');
+    req.flush(mockProduct);
+  });
+});
+```
+
+> **Note:** `describe`, `it`, `expect`, `beforeEach`, and `afterEach` are available as globals (no imports needed). Angular's Vitest setup enables `globals: true` by default. If you need mocking utilities like fake timers, import `vi` explicitly: `import { vi } from 'vitest';`. Then use `vi.fn()` instead of `jest.fn()`, `vi.spyOn()` instead of `jest.spyOn()`, and `vi.useFakeTimers()` / `vi.advanceTimersByTime()` instead of `fakeAsync` / `tick`.
 
 ### Integration Testing with Docker Compose
 
-Spin up the full system in production-like containers, then run E2E tests:
+Spin up the full system in production-like containers, then run end-to-end tests:
 
 ```bash
+# Build and start all containers
 docker compose up --build -d
+
+# Run Playwright tests against the containerized system
 npx playwright test --config=apps/shell-e2e/playwright.config.ts
+
+# Tear down
 docker compose down
 ```
 
-What to verify:
-1. Each remote route loads and renders.
-2. Cross-MFE flows (login in account, verify state in products).
-3. No MF warnings in browser console.
-4. `@angular/core` appears only once in Network tab.
+**What to verify in integration tests:**
+
+1. Each remote route loads and renders content (not a blank page).
+2. Cross-MFE flows work (log in via the account MFE, verify auth state in the products MFE).
+3. No Module Federation warnings in the browser console.
+4. `@angular/core` appears only once in the Network tab (no duplicate loading).
 
 ### Contract Testing
 
+Contract tests verify that each remote exposes the module shape the shell expects. If someone renames `remoteRoutes` to `routes` in a remote's `entry.routes.ts`, these tests catch it before deployment.
+
+First, add path aliases so the test can import remote entry files directly:
+
+```json
+// tsconfig.base.json (add to "paths")
+{
+  "compilerOptions": {
+    "paths": {
+      "@mfe-platform/mfe-products/entry": [
+        "apps/mfe-products/src/app/remote-entry/entry.routes.ts"
+      ],
+      "@mfe-platform/mfe-orders/entry": [
+        "apps/mfe-orders/src/app/remote-entry/entry.routes.ts"
+      ],
+      "@mfe-platform/mfe-account/entry": [
+        "apps/mfe-account/src/app/remote-entry/entry.routes.ts"
+      ]
+    }
+  }
+}
+```
+
+Then write the contract tests:
+
 ```typescript
 // apps/shell/src/app/mfe-contracts.spec.ts
-// Requires tsconfig path aliases (see below)
+import { Route } from '@angular/router';
 
 describe('MFE Contract Tests', () => {
-  it('mfe-products exposes remoteRoutes', async () => {
+  it('mfe-products exposes remoteRoutes as a non-empty array', async () => {
     const mod = await import('@mfe-platform/mfe-products/entry');
+    // Verify the export exists and is an array with at least one route
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
     expect(mod.remoteRoutes.length).toBeGreaterThan(0);
-    expect(mod.remoteRoutes.find((r: any) => r.path === '')).toBeDefined();
+    // Verify there is a default route (path: '')
+    expect(mod.remoteRoutes.find((r: Route) => r.path === '')).toBeDefined();
   });
 
-  it('mfe-orders exposes remoteRoutes', async () => {
+  it('mfe-orders exposes remoteRoutes as a non-empty array', async () => {
     const mod = await import('@mfe-platform/mfe-orders/entry');
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
   });
 
-  it('mfe-account exposes remoteRoutes', async () => {
+  it('mfe-account exposes remoteRoutes as a non-empty array', async () => {
     const mod = await import('@mfe-platform/mfe-account/entry');
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
@@ -499,9 +685,8 @@ describe('MFE Contract Tests', () => {
 });
 ```
 
-> Add to `tsconfig.base.json`:
-> ```json
-> "@mfe-platform/mfe-products/entry": ["apps/mfe-products/src/app/remote-entry/entry.routes.ts"],
-> "@mfe-platform/mfe-orders/entry": ["apps/mfe-orders/src/app/remote-entry/entry.routes.ts"],
-> "@mfe-platform/mfe-account/entry": ["apps/mfe-account/src/app/remote-entry/entry.routes.ts"]
-> ```
+> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx test shell`). Vitest resolves the `@mfe-platform/mfe-products/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). For that, use the Docker Compose integration tests above.
+
+Now that the application is tested and deployment artifacts are ready for your DevOps team, let's look at advanced patterns and best practices. That's Chapter 14.
+
+---
