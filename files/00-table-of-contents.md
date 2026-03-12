@@ -27,10 +27,10 @@ You are a **frontend developer, not a DevOps engineer**. A separate DevOps team 
 | Technology | Version | Purpose |
 |---|---|---|
 | Angular | 21.x | UI framework (standalone components, signals, zoneless by default, new control flow) |
-| Nx | 22.x | Monorepo build system (caching, generators, boundaries) |
+| Nx | 22.4.5 | Monorepo build system (caching, generators, boundaries) |
 | Webpack | 5.x | Bundler (required for Module Federation) |
 | `@module-federation/enhanced` | 2.x | Module Federation runtime (maintained by Zack Jackson and ByteDance) |
-| `@nx/module-federation` | 22.x | Nx's abstraction over Module Federation |
+| `@nx/module-federation` | 22.4.5 | Nx's abstraction over Module Federation |
 | Vitest | 4.x | Unit test runner (Angular 21 default, replaces Karma/Jasmine) |
 | TypeScript | 5.9+ | Type system |
 | Docker | 24+ | Reproducible builds and local integration testing |
@@ -44,9 +44,9 @@ Chapters 1 and 2 are concepts only, with no code. Chapter 3 introduces your firs
 The running example throughout the entire guide is an **e-commerce platform** with four applications:
 
 - **`shell`** (host): layout, navigation, authentication
-- **`mfeProducts`** (remote): product listing, product detail
-- **`mfeOrders`** (remote): order history, order tracking
-- **`mfeAccount`** (remote): user profile, settings
+- **`mfe_products`** (remote): product listing, product detail
+- **`mfe_orders`** (remote): order history, order tracking
+- **`mfe_account`** (remote): user profile, settings
 
 By the end, you will have a fully working microfrontend system running locally, with reference artifacts ready to hand off to your DevOps team for production deployment.
 

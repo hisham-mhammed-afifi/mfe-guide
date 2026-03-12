@@ -14,7 +14,7 @@ The user sees one website. Under the hood, that website is composed of multiple 
 
 ### What Is a Monorepo?
 
-A **monorepo** (short for "monolithic repository") is a single Git repository that contains multiple projects. Instead of having separate repositories for `shell`, `mfeProducts`, `mfeOrders`, and `mfeAccount`, all four live side by side in one repository.
+A **monorepo** (short for "monolithic repository") is a single Git repository that contains multiple projects. Instead of having separate repositories for `shell`, `mfe_products`, `mfe_orders`, and `mfe_account`, all four live side by side in one repository.
 
 Why? Because microfrontends that share libraries, models, and services need to stay in sync. A monorepo makes it easy to share code, run a single `npm install`, and ensure everyone uses the same Angular version. The alternative (separate repositories per MFE) creates significant coordination overhead for small-to-medium teams.
 
@@ -115,7 +115,7 @@ Before you begin, verify you have:
 We start with the `apps` preset, which creates an empty workspace with no applications. This gives us full control over how the shell is scaffolded with Module Federation.
 
 ```bash
-npx create-nx-workspace@latest mfe-platform \
+npx create-nx-workspace@22.4.5 mfe-platform \
   --preset=apps \
   --nxCloud=skip
 
@@ -129,7 +129,7 @@ cd mfe-platform
 ### Step 2: Install the Angular Plugin
 
 ```bash
-npm install @nx/angular
+npm install @nx/angular@22.4.5
 ```
 
 This single package installs Angular, Webpack, and all the Module Federation infrastructure that Nx needs. You do not need to install `@module-federation/enhanced` or any Webpack packages separately.
@@ -138,29 +138,16 @@ This single package installs Angular, Webpack, and all the Module Federation inf
 
 This is the key step. Nx's `@nx/angular:host` generator creates the shell application, generates all specified remotes, wires Module Federation config, configures routing, splits `main.ts`/`bootstrap.ts`, and creates the dynamic manifest. All in one command:
 
-> **Note:** If the generator fails with `The "@nx/angular:host" generator doesn't support the existing TypeScript setup`, set the following environment variable first:
-> ```bash
-> # Linux/macOS
-> export NX_IGNORE_UNSUPPORTED_TS_SETUP=true
->
-> # Windows (PowerShell)
-> $env:NX_IGNORE_UNSUPPORTED_TS_SETUP="true"
->
-> # Windows (CMD)
-> set NX_IGNORE_UNSUPPORTED_TS_SETUP=true
-> ```
-> This is needed because Nx 22 workspaces use TypeScript project references by default, which the Angular host generator does not fully support yet.
-
 ```bash
 npx nx g @nx/angular:host apps/shell \
-  --remotes=mfeProducts,mfeOrders,mfeAccount \
+  --remotes=mfe_products,mfe_orders,mfe_account \
   --dynamic \
   --prefix=app \
   --style=scss \
   --no-interactive
 ```
 
-> **Note:** Nx 22 does not allow hyphens in remote names. Remote names can only contain letters, digits, underscores, and dollar signs. This guide uses camelCase (`mfeProducts`) throughout. If you prefer underscores (`mfe_products`), that also works.
+> **Note:** Nx does not allow hyphens in remote names. Remote names can only contain letters, digits, underscores, and dollar signs. This guide uses snake_case (`mfe_products`) throughout.
 
 Here is what each flag does:
 
@@ -184,7 +171,7 @@ Here is what each flag does:
 > 1. Creates a separate Angular application with its own `module-federation.config.ts`, `webpack.config.ts`, `main.ts`, and `bootstrap.ts`.
 > 2. Configures an `exposes` block pointing to `entry.routes.ts` (the federated entry point).
 > 3. Generates a placeholder `RemoteEntry` component and `entry.routes.ts`.
-> 4. Assigns unique ports: shell on 4200, mfeProducts on 4201, mfeOrders on 4202, mfeAccount on 4203.
+> 4. Assigns unique ports: shell on 4200, mfe_products on 4201, mfe_orders on 4202, mfe_account on 4203.
 > 5. Adds a lazy route to the shell's `app.routes.ts` for each remote.
 
 > **Note:** In Angular 21, `standalone: true` is the default for components and directives. You will not see `standalone: true` in any generated code or in this guide. If you see it in older tutorials, it is no longer necessary.
@@ -198,9 +185,9 @@ mfe-platform/
   apps/
     shell/                      # Host application (port 4200)
     shell-e2e/                  # End-to-end tests for the shell
-    mfeProducts/                # Remote: product catalog (port 4201)
-    mfeOrders/                  # Remote: order management (port 4202)
-    mfeAccount/                 # Remote: user account (port 4203)
+    mfe_products/                # Remote: product catalog (port 4201)
+    mfe_orders/                  # Remote: order management (port 4202)
+    mfe_account/                 # Remote: user account (port 4203)
   libs/                         # Shared libraries (empty for now)
   nx.json                       # Nx workspace configuration
   tsconfig.base.json            # Shared TypeScript config

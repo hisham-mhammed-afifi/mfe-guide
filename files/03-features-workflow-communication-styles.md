@@ -4,7 +4,7 @@
 
 ## Chapter 7: Building Features in Remotes
 
-Let's build out `mfeProducts` with complete, compilable code. Every import is shown explicitly. No ellipsis, no "exercise for the reader."
+Let's build out `mfe_products` with complete, compilable code. Every import is shown explicitly. No ellipsis, no "exercise for the reader."
 
 ### What Happens When a User Clicks "Products"
 
@@ -13,8 +13,8 @@ Here is the sequence of events when the user navigates to `/products` in the she
 ```
 1. User clicks "Products" link in the shell
 2. Angular router matches path "products" -> loadChildren
-3. loadRemote('mfeProducts/Routes') is called
-4. Federation runtime looks up 'mfeProducts' URL from registered remotes
+3. loadRemote('mfe_products/Routes') is called
+4. Federation runtime looks up 'mfe_products' URL from registered remotes
 5. Browser fetches http://products.cdn.com/mf-manifest.json
 6. mf-manifest.json tells the runtime what the remote exposes and needs
 7. Federation checks shared deps (@angular/core, rxjs, etc.) - already loaded
@@ -183,7 +183,7 @@ export { ProductDetailComponent } from './lib/product-detail.component';
 Replace the placeholder `RemoteEntry` component with real routes that use the feature library. The `RemoteEntry` component in `entry.ts` is no longer referenced. You can safely delete that file.
 
 ```typescript
-// apps/mfeProducts/src/app/remote-entry/entry.routes.ts
+// apps/mfe_products/src/app/remote-entry/entry.routes.ts
 import { Route } from '@angular/router';
 
 export const remoteRoutes: Route[] = [
@@ -208,7 +208,7 @@ export const remoteRoutes: Route[] = [
 ### Step 7: Run Standalone
 
 ```bash
-npx nx serve mfeProducts
+npx nx serve mfe_products
 ```
 
 Navigate to `http://localhost:4201`. The products feature runs independently using its own `bootstrap.ts` and `app.config.ts` (with providers). This is useful for focused development without starting the full system.
@@ -257,15 +257,15 @@ Nx reads the `remotes` array in the shell's `module-federation.config.ts` to dis
 ### Developing a Specific Remote
 
 ```bash
-npx nx serve shell --devRemotes=mfeProducts
+npx nx serve shell --devRemotes=mfe_products
 ```
 
-Changes to `mfeProducts` source files trigger HMR instantly. `mfeOrders` and `mfeAccount` are served as static builds.
+Changes to `mfe_products` source files trigger HMR instantly. `mfe_orders` and `mfe_account` are served as static builds.
 
 ### Working on Multiple Remotes
 
 ```bash
-npx nx serve shell --devRemotes=mfeProducts,mfeOrders
+npx nx serve shell --devRemotes=mfe_products,mfe_orders
 ```
 
 > **Warning:** Each dev remote runs its own `webpack-dev-server`, consuming 1-2 GB of RAM. Running 4+ dev remotes simultaneously can consume 8+ GB. Only use `--devRemotes` for the remotes you are actively editing.
@@ -293,8 +293,8 @@ Since Angular runs as a singleton, `@Injectable({ providedIn: 'root' })` service
 export class AuthService { /* ... */ }
 
 // Shell:        inject(AuthService)  -> Instance A
-// mfeProducts: inject(AuthService)  -> Same Instance A
-// mfeOrders:   inject(AuthService)  -> Same Instance A
+// mfe_products: inject(AuthService)  -> Same Instance A
+// mfe_orders:   inject(AuthService)  -> Same Instance A
 ```
 
 This is the safest and most debuggable approach for cross-MFE state. As we saw in Chapter 4, the `AuthService` uses signals internally, and every MFE reads the same signal values because they share the same service instance.
@@ -322,12 +322,12 @@ export const isAuthenticated = computed(() => currentUser() !== null);
 For loose notifications between microfrontends that do not need request-response patterns:
 
 ```typescript
-// Dispatch from mfeProducts (e.g., when user adds item to cart)
+// Dispatch from mfe_products (e.g., when user adds item to cart)
 window.dispatchEvent(new CustomEvent('cart:add', {
   detail: { productId: '123', qty: 1 },
 }));
 
-// Listen in mfeOrders (e.g., to update cart badge count)
+// Listen in mfe_orders (e.g., to update cart badge count)
 window.addEventListener('cart:add', ((e: CustomEvent) => {
   console.log('Item added:', e.detail);
 }) as EventListener);
