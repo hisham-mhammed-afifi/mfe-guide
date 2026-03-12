@@ -203,7 +203,7 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 | 6 | Styles leaking between MFEs | `ViewEncapsulation.None` or global CSS in remote | Use default encapsulation. No global CSS in remotes. Use CSS custom properties for theming |
 | 7 | `nx serve shell` does not load remotes | Nx cannot discover remote projects | Verify remotes were generated with correct `--host` relationship. Check the project graph with `npx nx graph`. |
 | 8 | CORS errors loading `mf-manifest.json` in production | CDN missing CORS response headers | Ask your DevOps team to add `Access-Control-Allow-Origin` for the shell's domain on each remote's CDN |
-| 9 | Stale `remoteEntry.js` or `mf-manifest.json` after deploy | CloudFront default cache TTL too long | Ask your DevOps team to create a cache behavior for `/remoteEntry.js` and `/mf-manifest.json` with 60s TTL and invalidate on deploy |
+| 9 | Stale `remoteEntry.mjs` or `mf-manifest.json` after deploy | CloudFront default cache TTL too long | Ask your DevOps team to create a cache behavior for `/remoteEntry.mjs` and `/mf-manifest.json` with 60s TTL and invalidate on deploy |
 | 10 | Webpack required but esbuild is default | Angular 21 defaults to esbuild | The `@nx/angular:host` generator uses Webpack automatically. If you created the app differently, use `@nx/angular:convert-to-rspack` or reconfigure |
 | 11 | Circular dependency between MFEs | Remote A imports from Remote B's library | Enforce scope boundaries. Extract shared code into a `scope:shared` library |
 | 12 | Docker build slow or no cache | `COPY . .` before `npm ci` | Use multi-stage builds. Copy `package.json` first, run `npm ci`, then copy source. Ask your DevOps team to verify |
@@ -257,10 +257,10 @@ npx nx build mfe_account --configuration=production
 ```
 
 **Output directory per app:**
-`dist/apps/<app-name>/browser/` containing `index.html`, JS chunks, CSS, and assets.
+`dist/apps/<app-name>/` containing `index.html`, JS chunks, CSS, and assets.
 
 **Manifest file (shell only):**
-Located at `dist/apps/shell/browser/module-federation.manifest.json`. Must be replaced with environment-specific URLs after building, before deploying. Format:
+Located at `dist/apps/shell/module-federation.manifest.json`. Must be replaced with environment-specific URLs after building, before deploying. Format:
 ```json
 {
   "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
@@ -273,7 +273,7 @@ Located at `dist/apps/shell/browser/module-federation.manifest.json`. Must be re
 Each remote's CDN must set `Access-Control-Allow-Origin: https://app.example.com` (the shell's domain) and `Access-Control-Allow-Methods: GET, OPTIONS`.
 
 **Cache-busting rules:**
-- `remoteEntry.js` and `mf-manifest.json`: short TTL (60 seconds). These files change on every deploy but their filenames do NOT change.
+- `remoteEntry.mjs` and `mf-manifest.json`: short TTL (60 seconds). These files change on every deploy but their filenames do NOT change.
 - All other `.js` and `.css` files: 1 year cache. These are content-hashed (filename changes when content changes).
 - `index.html`: always revalidate (TTL 0).
 - After every deploy: invalidate `/index.html` and `/module-federation.manifest.json` in CloudFront.

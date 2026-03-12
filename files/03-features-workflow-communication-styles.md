@@ -42,8 +42,8 @@ Update the public API to export it:
 
 ```typescript
 // libs/shared/models/src/index.ts
-export { Product } from './lib/product.interface';
-export { User, LoginRequest } from './lib/user.interface';
+export type { Product } from './lib/product.interface';
+export type { User, LoginRequest } from './lib/user.interface';
 ```
 
 ### Step 2: Create the Product Service
@@ -276,7 +276,7 @@ If clicking a remote link shows a blank page or a loading error:
 
 1. Nx discovers remotes from the project graph. Verify that all remote projects were generated with `--host=shell` or were listed in the original `--remotes` flag.
 2. Check that `module-federation.manifest.json` has the correct localhost URLs.
-3. Open the browser DevTools Network tab and look for failed requests to `mf-manifest.json` or `remoteEntry.js`.
+3. Open the browser DevTools Network tab and look for failed requests to `mf-manifest.json` or `remoteEntry.mjs`.
 
 Now that the development workflow is clear, let's look at how microfrontends communicate with each other. That's Chapter 9.
 

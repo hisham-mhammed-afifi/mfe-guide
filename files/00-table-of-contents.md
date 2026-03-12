@@ -29,7 +29,7 @@ You are a **frontend developer, not a DevOps engineer**. A separate DevOps team 
 | Angular | 21.x | UI framework (standalone components, signals, zoneless by default, new control flow) |
 | Nx | 22.4.5 | Monorepo build system (caching, generators, boundaries) |
 | Webpack | 5.x | Bundler (required for Module Federation) |
-| `@module-federation/enhanced` | 2.x | Module Federation runtime (maintained by Zack Jackson and ByteDance) |
+| `@module-federation/enhanced` | 0.x | Module Federation runtime (maintained by Zack Jackson and ByteDance) |
 | `@nx/module-federation` | 22.4.5 | Nx's abstraction over Module Federation |
 | Vitest | 4.x | Unit test runner (Angular 21 default, replaces Karma/Jasmine) |
 | TypeScript | 5.9+ | Type system |
@@ -39,7 +39,7 @@ You are a **frontend developer, not a DevOps engineer**. A separate DevOps team 
 
 This guide is a **narrative path**. Each chapter builds on the previous one. Skipping ahead will leave you missing context that later chapters assume.
 
-Chapters 1 and 2 are concepts only, with no code. Chapter 3 introduces your first commands. Code complexity increases steadily from there. Docker and AWS appear only after everything works locally, and they are framed as "understand and hand off to DevOps" rather than "write it yourself." The one exception is `docker compose up` for local integration testing, which you run yourself.
+Chapter 1 is concepts only, with no code. Chapter 2 introduces your first commands and walks you through workspace setup. Code complexity increases steadily from there. Docker and AWS appear only after everything works locally, and they are framed as "understand and hand off to DevOps" rather than "write it yourself." The one exception is `docker compose up` for local integration testing, which you run yourself.
 
 The running example throughout the entire guide is an **e-commerce platform** with four applications:
 

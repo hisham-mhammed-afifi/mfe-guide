@@ -22,7 +22,7 @@ This chapter is framed differently from the rest of the guide. As a frontend dev
 | module-federation.config.ts              | CI/CD pipeline (GitHub Actions, etc.)     |
 | module-federation.manifest.json format   | AWS infrastructure (S3, CloudFront, ECS)  |
 | Build commands: npx nx build <app>       | nginx configuration                       |
-| Output paths: dist/apps/<name>/browser   | CORS headers on CDN                       |
+| Output paths: dist/apps/<name>            | CORS headers on CDN                       |
 | Cache-busting rules for federation files | SSL certificates and DNS                  |
 | Environment-specific manifest URLs       | Container orchestration (ECS, EKS)        |
 +------------------------------------------+-------------------------------------------+
@@ -41,19 +41,19 @@ npx nx build mfe_orders --configuration=production
 npx nx build mfe_account --configuration=production
 ```
 
-The output for each app lands in `dist/apps/<name>/browser/` and contains:
+The output for each app lands in `dist/apps/<name>/` and contains:
 
 ```
-dist/apps/mfe_products/browser/
+dist/apps/mfe_products/
   index.html              # The SPA entry point
   main.[hash].js          # Application code (content-hashed filename)
   polyfills.[hash].js     # Browser polyfills (content-hashed)
-  remoteEntry.js          # Module Federation entry (NOT hashed)
+  remoteEntry.mjs          # Module Federation entry (NOT hashed)
   styles.[hash].css       # Compiled stylesheets
   assets/                 # Static assets
 ```
 
-> **Warning:** `remoteEntry.js` is the file that Module Federation uses to discover what a remote exposes. Unlike other JS files, it is **not content-hashed**. Its filename stays the same across builds, but its contents change. This has critical implications for caching (covered below).
+> **Warning:** `remoteEntry.mjs` is the file that Module Federation uses to discover what a remote exposes. Unlike other JS files, it is **not content-hashed**. Its filename stays the same across builds, but its contents change. This has critical implications for caching (covered below).
 
 > **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfe_products --configuration=production` and checking the output.
 
@@ -127,7 +127,7 @@ RUN npx nx build ${APP_NAME} --configuration=${CONFIGURATION}
 FROM nginx:1.28-alpine AS server
 ARG APP_NAME
 # Copy only the built static files into the nginx html directory
-COPY --from=builder /app/dist/apps/${APP_NAME}/browser /usr/share/nginx/html
+COPY --from=builder /app/dist/apps/${APP_NAME} /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
@@ -156,9 +156,9 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Short cache for remoteEntry.js (changes on every deploy, not hashed)
+    # Short cache for remoteEntry.mjs (changes on every deploy, not hashed)
     # Exact-match location takes priority over the regex rule below
-    location = /remoteEntry.js {
+    location = /remoteEntry.mjs {
         expires 60s;
         add_header Cache-Control "public, max-age=60";
     }
@@ -181,7 +181,7 @@ server {
 }
 ```
 
-> **Note:** The `location = /remoteEntry.js` and `location = /mf-manifest.json` (exact match) blocks take priority over the `location ~*` (regex match) in nginx. This means `remoteEntry.js` and `mf-manifest.json` get a 60-second cache while all other `.js` files get a 1-year cache.
+> **Note:** The `location = /remoteEntry.mjs` and `location = /mf-manifest.json` (exact match) blocks take priority over the `location ~*` (regex match) in nginx. This means `remoteEntry.mjs` and `mf-manifest.json` get a 60-second cache while all other `.js` files get a 1-year cache.
 
 ### docker-compose.yml (You Run This Yourself)
 
@@ -269,7 +269,7 @@ ENV=${1:-prod}
 npx nx build shell --configuration=production
 
 # Overwrite manifest with environment-specific URLs
-cat > dist/apps/shell/browser/module-federation.manifest.json << EOF
+cat > dist/apps/shell/module-federation.manifest.json << EOF
 {
   "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
   "mfe_orders": "https://orders.mfe.example.com/mf-manifest.json",
@@ -278,7 +278,7 @@ cat > dist/apps/shell/browser/module-federation.manifest.json << EOF
 EOF
 
 # Sync to S3 and invalidate CloudFront cache
-aws s3 sync dist/apps/shell/browser s3://mfe-shell-${ENV} --delete
+aws s3 sync dist/apps/shell s3://mfe-shell-${ENV} --delete
 aws cloudfront create-invalidation \
   --distribution-id ${CF_DIST_SHELL} \
   --paths "/module-federation.manifest.json" "/index.html"
@@ -386,7 +386,7 @@ jobs:
       - name: Inject manifest (shell only)
         if: steps.check.outputs.affected == 'true' && matrix.app == 'shell'
         run: |
-          cat > dist/apps/shell/browser/module-federation.manifest.json << 'EOF'
+          cat > dist/apps/shell/module-federation.manifest.json << 'EOF'
           {
             "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
             "mfe_orders": "https://orders.mfe.example.com/mf-manifest.json",
@@ -407,7 +407,7 @@ jobs:
         run: |
           BUCKET="mfe-${{ matrix.app }}-prod"
           DIST_ID="${{ secrets[format('CF_DIST_{0}', matrix.app)] }}"
-          aws s3 sync dist/apps/${{ matrix.app }}/browser s3://${BUCKET} --delete
+          aws s3 sync dist/apps/${{ matrix.app }} s3://${BUCKET} --delete
           aws cloudfront create-invalidation --distribution-id ${DIST_ID} --paths "/*"
 ```
 
@@ -454,24 +454,24 @@ Share this table with your DevOps team so they configure caching correctly:
 
 | Path Pattern | TTL | Why |
 |---|---|---|
-| `/remoteEntry.js` | 60 seconds | Changes on every deploy, not content-hashed |
+| `/remoteEntry.mjs` | 60 seconds | Changes on every deploy, not content-hashed |
 | `/mf-manifest.json` | 60 seconds | Federation manifest, changes on every deploy, not content-hashed |
 | `/*.js` (hashed chunks) | 1 year | Content-hashed filenames, immutable |
 | `/index.html` | 0 (always revalidate) | Points to latest hashed chunks |
 | `/assets/*` | 1 year | Immutable static assets |
 
-> **Warning:** If your DevOps team does not set a short TTL for `remoteEntry.js` and `mf-manifest.json`, users may load a stale version after a deploy. The shell would try to load code that no longer exists, causing runtime errors.
+> **Warning:** If your DevOps team does not set a short TTL for `remoteEntry.mjs` and `mf-manifest.json`, users may load a stale version after a deploy. The shell would try to load code that no longer exists, causing runtime errors.
 
 ### Checklist: What to Tell Your DevOps Team
 
 Copy this into a Slack message or Jira ticket:
 
 - **Build commands:** `npx nx build <app-name> --configuration=production` for each of: `shell`, `mfe_products`, `mfe_orders`, `mfe_account`
-- **Output directory:** `dist/apps/<app-name>/browser/` (contains `index.html`, JS chunks, CSS, assets)
-- **Manifest file:** `dist/apps/shell/browser/module-federation.manifest.json` must be replaced with environment-specific URLs after building, before deploying
+- **Output directory:** `dist/apps/<app-name>/` (contains `index.html`, JS chunks, CSS, assets)
+- **Manifest file:** `dist/apps/shell/module-federation.manifest.json` must be replaced with environment-specific URLs after building, before deploying
 - **Manifest format:** JSON object where keys are remote names and values are full URLs to `mf-manifest.json`
 - **CORS requirement:** Each remote's CDN must set `Access-Control-Allow-Origin` to the shell's domain
-- **Cache-busting:** `remoteEntry.js` and `mf-manifest.json` must have a short TTL (60s). All other `.js` and `.css` files are content-hashed and can be cached for 1 year. `index.html` should always revalidate
+- **Cache-busting:** `remoteEntry.mjs` and `mf-manifest.json` must have a short TTL (60s). All other `.js` and `.css` files are content-hashed and can be cached for 1 year. `index.html` should always revalidate
 - **SPA routing:** nginx (or CloudFront) must return `index.html` for all routes that do not match a file
 - **CloudFront invalidation:** After each deploy, invalidate at minimum `/index.html` and `/module-federation.manifest.json`
 
@@ -521,7 +521,7 @@ Now let's look at how to test the composed system effectively. That's Chapter 13
 
 ## Chapter 13: Testing Strategy
 
-> **Note:** Angular 21 made Vitest the default test runner, replacing Karma/Jasmine. Nx 22.3+ supports Vitest for Angular projects via the `vitest-angular` option (using Angular's native `@angular/build:unit-test` builder). All test files use the standard `.spec.ts` extension. The `nx test` command runs Vitest in watch mode by default during local development and in single-run mode in CI (when the `CI` environment variable is set). Angular's `TestBed`, `HttpTestingController`, and other testing utilities work the same way with Vitest as they did with previous test runners.
+> **Note:** Angular 21 made Vitest the default test runner, replacing Karma/Jasmine. Nx 22.3+ supports Vitest for Angular projects via the `@analogjs/vite-plugin-angular` Vite plugin, which enables Angular's TestBed to work within a Vitest environment. All test files use the standard `.spec.ts` extension. The `nx test` command runs Vitest in single-run mode by default (the generated `vite.config.mts` sets `watch: false`). Add the `--watch` flag for continuous testing during local development: `npx nx test mfe_products --watch`. Angular's `TestBed`, `HttpTestingController`, and other testing utilities work the same way with Vitest as they did with previous test runners.
 
 ### Unit Testing
 

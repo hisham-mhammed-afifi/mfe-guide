@@ -186,13 +186,17 @@ mfe-platform/
     shell/                      # Host application (port 4200)
     shell-e2e/                  # End-to-end tests for the shell
     mfe_products/                # Remote: product catalog (port 4201)
+    mfe_products-e2e/            # E2E tests for products remote
     mfe_orders/                  # Remote: order management (port 4202)
+    mfe_orders-e2e/              # E2E tests for orders remote
     mfe_account/                 # Remote: user account (port 4203)
-  libs/                         # Shared libraries (empty for now)
+    mfe_account-e2e/             # E2E tests for account remote
   nx.json                       # Nx workspace configuration
   tsconfig.base.json            # Shared TypeScript config
   package.json                  # Single dependency tree for all apps
 ```
+
+> **Note:** The `libs/` directory does not exist yet. It will be created automatically when you generate your first shared library in Chapter 4.
 
 > **Note:** Each app also contains a `vite.config.mts` file for Vitest configuration. This is generated automatically and typically needs no changes.
 
