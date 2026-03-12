@@ -181,6 +181,8 @@ server {
 }
 ```
 
+> **Warning:** The `Access-Control-Allow-Origin *` wildcard is acceptable for local Docker testing only. In production, always restrict this to the shell's specific domain (e.g., `https://app.example.com`). A wildcard CORS header on a production CDN or nginx would allow any website to load your remote bundles.
+
 > **Note:** The `location = /remoteEntry.mjs` and `location = /mf-manifest.json` (exact match) blocks take priority over the `location ~*` (regex match) in nginx. This means `remoteEntry.mjs` and `mf-manifest.json` get a 60-second cache while all other `.js` files get a 1-year cache.
 
 ### docker-compose.yml (You Run This Yourself)
@@ -302,6 +304,8 @@ exec nginx -g "daemon off;"
 ```
 
 In ECS, these environment variables come from the **task definition** (a JSON configuration that tells ECS how to run a container). In EKS (Kubernetes), they come from a **ConfigMap** (a Kubernetes resource that stores configuration as key-value pairs).
+
+> **Note:** The `entrypoint.sh` script is used only in ECS/EKS container deployments (Approach B above). The `docker-compose.yml` in this guide uses Approach A: the dev manifest file is already present in the build output, so no entrypoint injection is needed.
 
 ### CI/CD Pipeline (Reference for DevOps)
 
@@ -492,10 +496,10 @@ Module Federation handles this through **version negotiation** at runtime: when 
 The `withModuleFederation` helper configures shared deps with:
 
 - **`singleton: true`** for Angular core packages (only one instance of Angular can run).
-- **`strictVersion: true`** for critical packages. This produces a **console warning** (not a crash) like `Unsatisfied version X of shared singleton module Y`.
+- **`strictVersion: true`** for critical packages. This produces a **console warning by default** (not a crash) like `Unsatisfied version X of shared singleton module Y`.
 - **`requiredVersion: 'auto'`** reads the version from `package.json`.
 
-> **Warning:** `strictVersion` does NOT throw a JavaScript error. It only logs a warning. The app continues running, but behavior may be unpredictable. Version mismatches can sneak into production unnoticed. Always check for these warnings in integration tests.
+> **Warning:** `strictVersion` does not throw a JavaScript error by default, though behavior may vary across Module Federation versions. It only logs a warning. The app continues running, but behavior may be unpredictable. Version mismatches can sneak into production unnoticed. Always check for these warnings in integration tests.
 
 ### Keeping Versions Aligned
 
@@ -585,33 +589,36 @@ describe('ProductService', () => {
 
   it('should fetch all products', () => {
     const mockProducts = [
-      { id: '1', name: 'Widget', description: 'A widget', price: 9.99, imageUrl: '' },
+      { id: 1, title: 'Widget', description: 'A widget', price: 9.99, thumbnail: '', category: 'test', rating: 4.5, stock: 10 },
     ];
 
     service.getAll().subscribe((products) => {
       expect(products).toEqual(mockProducts);
     });
 
-    const req = httpTesting.expectOne('/api/products');
+    const req = httpTesting.expectOne('https://dummyjson.com/products');
     expect(req.request.method).toBe('GET');
-    req.flush(mockProducts);
+    // DummyJSON wraps products in an object; the service extracts .products
+    req.flush({ products: mockProducts, total: 1, skip: 0, limit: 30 });
   });
 
   it('should fetch a product by ID', () => {
     const mockProduct = {
-      id: '1', name: 'Widget', description: 'A widget', price: 9.99, imageUrl: '',
+      id: 1, title: 'Widget', description: 'A widget', price: 9.99, thumbnail: '', category: 'test', rating: 4.5, stock: 10,
     };
 
-    service.getById('1').subscribe((product) => {
+    service.getById(1).subscribe((product) => {
       expect(product).toEqual(mockProduct);
     });
 
-    const req = httpTesting.expectOne('/api/products/1');
+    const req = httpTesting.expectOne('https://dummyjson.com/products/1');
     expect(req.request.method).toBe('GET');
     req.flush(mockProduct);
   });
 });
 ```
+
+> **Note:** The `getAll` test flushes a wrapped response (`{ products: [...], total, skip, limit }`) matching DummyJSON's actual API shape. The service's `map(res => res.products)` extracts the array, which is what the test asserts against.
 
 > **Note:** `describe`, `it`, `expect`, `beforeEach`, and `afterEach` are available as globals (no imports needed). Angular's Vitest setup enables `globals: true` by default. If you need mocking utilities like fake timers, import `vi` explicitly: `import { vi } from 'vitest';`. Then use `vi.fn()` instead of `jest.fn()`, `vi.spyOn()` instead of `jest.spyOn()`, and `vi.useFakeTimers()` / `vi.advanceTimersByTime()` instead of `fakeAsync` / `tick`.
 
@@ -693,7 +700,7 @@ describe('MFE Contract Tests', () => {
 });
 ```
 
-> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx test shell`). Vitest resolves the `@mfe-platform/mfe_products/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). For that, use the Docker Compose integration tests above.
+> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx test shell`). Vitest resolves the `@mfe-platform/mfe_products/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). To verify that the `exposes` paths resolve to actual files, run a production build (`npx nx build mfe_products --configuration=production`). The build will fail if an exposed path points to a non-existent file. The Docker Compose integration tests also catch this class of error.
 
 Now that the application is tested and deployment artifacts are ready for your DevOps team, let's look at advanced patterns and best practices. That's Chapter 14.
 

@@ -48,6 +48,18 @@ The `{ dts: false }` option disables automatic TypeScript declaration generation
 
 You never touch this file unless you need advanced customization. Each remote also gets a `webpack.prod.config.ts` for production build overrides. The shell does not have one; it uses the same `webpack.config.ts` for both development and production.
 
+The generated `webpack.prod.config.ts` for each remote is minimal:
+
+```typescript
+// apps/mfe_products/webpack.prod.config.ts
+import { withModuleFederation } from '@nx/module-federation/angular';
+import config from './module-federation.config';
+
+export default withModuleFederation(config, { dts: false });
+```
+
+In most projects this file is identical to `webpack.config.ts`. It exists as a separate entry point so you can add production-only Webpack plugins (such as bundle analyzers) without affecting development builds.
+
 ### Shell: main.ts (The Dynamic Bootstrap)
 
 Module Federation must negotiate shared dependencies (like `@angular/core`) before any Angular code runs. That is why the generator splits the bootstrap into two files. The `main.ts` file handles federation setup, then dynamically imports `bootstrap.ts` to start Angular.
@@ -265,6 +277,14 @@ npx nx g @nx/angular:library --directory=libs/account/data-access \
 
 > **Warning:** In Nx 22, always use `--directory`, `--name`, and `--importPath` together. The `--directory` flag controls the folder location, `--name` sets the project name, and `--importPath` sets the TypeScript path alias in `tsconfig.base.json`. Without `--importPath`, Nx derives a default that may not match what you expect.
 
+After generating all libraries, verify they appear in the project graph:
+
+```bash
+npx nx graph
+```
+
+This opens an interactive browser visualization. Confirm you see all 10 libraries: `shared-ui`, `shared-data-access-auth`, `shared-models`, `shared-utils`, `products-feature`, `products-data-access`, `orders-feature`, `orders-data-access`, `account-feature`, and `account-data-access`. If any are missing, check the generator command for typos in `--directory` or `--importPath`.
+
 ### Updated Workspace Layout
 
 After generating all libraries, your workspace looks like this:
@@ -301,10 +321,10 @@ When Nx builds a host or remote, the `withModuleFederation` helper:
 1. Scans the Nx project graph for all dependencies of the current app.
 2. Identifies all workspace libraries imported via tsconfig path mappings (like `@mfe-platform/shared-ui`).
 3. Identifies all npm packages used (like `@angular/core`, `rxjs`).
-4. Configures ALL of these as **shared singletons** in the `ModuleFederationPlugin`.
+4. Configures Angular core packages and workspace libraries as **shared singletons** in the `ModuleFederationPlugin`. Other npm dependencies are shared but not necessarily marked as singleton.
 5. Sets `requiredVersion` to the version from `package.json` for npm packages.
 
-**Result:** You never manually configure shared dependencies. Angular core, RxJS, your shared libraries: everything is shared as singletons across all microfrontends without duplication.
+**Result:** You never manually configure shared dependencies. Angular core packages, RxJS, and your workspace libraries are shared as singletons across all microfrontends. Other npm packages are shared to avoid duplication where possible, but may not be forced to a single instance.
 
 > **Note:** Adding a new shared library later is automatic. Create the library with `nx g`, import it in your apps, and rebuild. Nx's project graph analysis picks it up in the next build. No manual config changes needed.
 
@@ -312,18 +332,23 @@ When Nx builds a host or remote, the `withModuleFederation` helper:
 
 A shared authentication service is the most common cross-MFE need. Here is the complete, compilable code.
 
-First, define the models it depends on:
+First, define the models it depends on. Create the file `user.interface.ts` in `libs/shared/models/src/lib/`:
 
 ```typescript
 // libs/shared/models/src/lib/user.interface.ts
 export interface User {
-  id: string;
+  id: number;
+  username: string;
   email: string;
-  displayName: string;
+  firstName: string;
+  lastName: string;
+  image: string;
+  accessToken: string;
+  refreshToken: string;
 }
 
 export interface LoginRequest {
-  email: string;
+  username: string;
   password: string;
 }
 ```
@@ -335,7 +360,7 @@ export type { User, LoginRequest } from './lib/user.interface';
 
 > **Note:** Angular 21 enables `isolatedModules` by default in its TypeScript configuration. When re-exporting types or interfaces, you must use `export type` instead of `export`. Failing to do so causes `TS1205` errors during build.
 
-Now the service itself:
+Now the service itself. Create the file `auth.service.ts` in `libs/shared/data-access-auth/src/lib/`:
 
 ```typescript
 // libs/shared/data-access-auth/src/lib/auth.service.ts
@@ -358,9 +383,9 @@ export class AuthService {
   readonly isAuthenticated = computed(() => this.currentUser() !== null);
 
   login(credentials: LoginRequest): Observable<User> {
-    return this.http.post<User>('/api/auth/login', credentials).pipe(
-      tap((user) => this.currentUser.set(user))
-    );
+    return this.http
+      .post<User>('https://dummyjson.com/auth/login', credentials)
+      .pipe(tap((user) => this.currentUser.set(user)));
   }
 
   logout(): void {
@@ -368,6 +393,10 @@ export class AuthService {
   }
 }
 ```
+
+> **Note:** This `AuthService` stores the current user in an in-memory signal. On page refresh, the user is logged out. A production implementation would persist tokens (e.g., in `localStorage` or HTTP-only cookies) and restore them on initialization.
+
+> **Note:** This guide uses [DummyJSON](https://dummyjson.com) as a free public API for development. You can log in with any user from `https://dummyjson.com/users` (e.g., username: `emilys`, password: `emilyspass`). In a real application, replace the DummyJSON URL with your own backend.
 
 Export from the library's public API:
 
@@ -385,6 +414,8 @@ Because Angular runs as a singleton and the library is shared as a singleton, ev
 > - [x] Nx automatically shares all workspace libraries as singletons via Module Federation
 > - [x] Built a complete `AuthService` with signals that works across all microfrontends
 > - [x] No manual Module Federation configuration was needed
+
+> **Note:** Since all apps share one workspace, breaking changes to shared libraries (like renaming a field in `Product`) are caught at build time. Use `npx nx affected -t build` in CI to identify and rebuild every app affected by the change. If you deploy only some affected apps and miss others, those deployed MFEs will have a stale version of the shared library. Always deploy all affected apps together.
 
 With shared libraries in place, we need to wire up Angular's providers and routing correctly across the shell and remotes. That's the trickiest part, and it's Chapter 5.
 
@@ -407,6 +438,8 @@ This creates a rule you must follow:
 ### Shell: app.config.ts (The Source of Truth)
 
 > **Important:** The generator only includes `provideBrowserGlobalErrorListeners()` and `provideRouter(appRoutes)` in the shell's `app.config.ts`. You must manually add `provideHttpClient(withInterceptorsFromDi())`, `provideAnimationsAsync()`, and any other global providers your application needs. These are required for remotes to function correctly when loaded inside the shell.
+
+Open `apps/shell/src/app/app.config.ts` and replace its contents with the following:
 
 ```typescript
 // apps/shell/src/app/app.config.ts
@@ -500,7 +533,7 @@ The error message looks like: `NullInjectorError: R3InjectorError(Environment)[H
 
 **Fix:** Always ensure `provideHttpClient()` is in the shell's `app.config.ts`. Verify it is there before debugging anything else. If you add a new global provider to any remote, you must also add it to the shell.
 
-### Dual Routing: Shell Routes vs. Remote Routes
+### Dual Routing: Shell Routes vs. Remote Routes (No Changes Needed Yet)
 
 Each remote has **two routing contexts**:
 
@@ -556,6 +589,8 @@ import { RouterOutlet, RouterLink } from '@angular/router';
 export class App {}
 ```
 
+> **Note:** Angular 21's generator names the root component `App` (without the `Component` suffix). Other components in this guide use the traditional `*Component` convention. Both styles are valid in Angular.
+
 ```html
 <!-- apps/shell/src/app/app.html -->
 <nav>
@@ -577,6 +612,8 @@ export class App {}
 
 > **Warning:** If a remote loads but shows a blank page inside the shell, the most common cause is a missing `<router-outlet>`. Verify the shell's `App` template includes one.
 
+> **Tip:** To remove the Nx welcome placeholder: delete the `NxWelcome` import and its reference from the shell's component, and remove the default route `{ path: '', component: NxWelcome }` from `app.routes.ts`. Do this once you have your own home page component.
+
 If a remote has **child routes**, its entry component needs its own `<router-outlet>`:
 
 ```typescript
@@ -594,6 +631,14 @@ export class ProductsShellComponent {}
 ```
 
 This pattern is used when the remote has multiple routes (e.g., product list and product detail). We wire it up fully in Chapter 7.
+
+> **What just happened?**
+>
+> - [x] Configured the shell's `app.config.ts` with global providers (`HttpClient`, animations, router)
+> - [x] Understood that remotes inherit the shell's providers at runtime
+> - [x] Configured each remote's `app.config.ts` for standalone development
+> - [x] Understood dual routing: `entry.routes.ts` for federation, `app.routes.ts` for standalone
+> - [x] Verified where `<router-outlet>` goes in the shell and in remote entry components
 
 Now that providers and routing are set up correctly, we need to prevent microfrontends from importing each other's internals. That's Chapter 6.
 
@@ -622,7 +667,7 @@ Add tags to each project's `project.json`. Tags have two dimensions: **scope** (
 
 ### Configuring Constraints
 
-Add the boundary rules to your ESLint configuration:
+Open `eslint.config.mjs` at the workspace root. Find the existing `@nx/enforce-module-boundaries` rule (it will have an empty `depConstraints` array). Replace the `depConstraints` value with the array shown below:
 
 ```javascript
 // eslint.config.mjs (relevant excerpt)

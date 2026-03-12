@@ -72,6 +72,16 @@ export class RemoteUnavailableComponent {
 }
 ```
 
+> **Note:** `window.location.reload()` is a simple fallback that causes a full page reload, losing all client-side state (auth tokens in memory, form data, navigation history). For a more robust production pattern, inject `Router` and re-navigate to the current URL instead:
+>
+> ```typescript
+> retry(): void {
+>   const url = this.router.url;
+>   this.router.navigateByUrl('/', { skipLocationChange: true })
+>     .then(() => this.router.navigateByUrl(url));
+> }
+> ```
+
 ```typescript
 // apps/shell/src/app/app.routes.ts
 import { loadRemote } from '@module-federation/enhanced/runtime';
@@ -222,7 +232,7 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 
 ## Appendix A: Quick Reference Card
 
-The 10 most common Nx and Module Federation commands (all explained in the chapters above):
+The most common Nx and Module Federation commands (all explained in the chapters above):
 
 | Command | What It Does |
 |---|---|

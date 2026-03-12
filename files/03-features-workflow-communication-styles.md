@@ -27,16 +27,23 @@ The entire process happens in milliseconds on a fast connection. Steps 5-8 happe
 
 ### Step 1: Define the Product Model
 
+Create the file `product.interface.ts` in `libs/shared/models/src/lib/`:
+
 ```typescript
 // libs/shared/models/src/lib/product.interface.ts
 export interface Product {
-  id: string;
-  name: string;
+  id: number;
+  title: string;
   description: string;
   price: number;
-  imageUrl: string;
+  thumbnail: string;
+  category: string;
+  rating: number;
+  stock: number;
 }
 ```
+
+> **Note:** This interface matches the shape returned by `https://dummyjson.com/products`. DummyJSON products have many more fields (images, brand, dimensions, reviews, etc.). We include only the fields our components use.
 
 Update the public API to export it:
 
@@ -48,24 +55,38 @@ export type { User, LoginRequest } from './lib/user.interface';
 
 ### Step 2: Create the Product Service
 
+Create the file `product.service.ts` in `libs/products/data-access/src/lib/`:
+
 ```typescript
 // libs/products/data-access/src/lib/product.service.ts
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { Product } from '@mfe-platform/shared-models';
+
+// Response wrapper: DummyJSON wraps products in an object
+interface ProductsResponse {
+  products: Product[];
+  total: number;
+  skip: number;
+  limit: number;
+}
 
 // providedIn: 'root' makes this a singleton shared across all MFEs
 @Injectable({ providedIn: 'root' })
 export class ProductService {
   private readonly http = inject(HttpClient);
+  private readonly apiUrl = 'https://dummyjson.com/products';
 
   getAll(): Observable<Product[]> {
-    return this.http.get<Product[]>('/api/products');
+    return this.http
+      .get<ProductsResponse>(this.apiUrl)
+      .pipe(map((res) => res.products));
   }
 
-  getById(id: string): Observable<Product> {
-    return this.http.get<Product>(`/api/products/${id}`);
+  getById(id: number): Observable<Product> {
+    return this.http.get<Product>(`${this.apiUrl}/${id}`);
   }
 }
 ```
@@ -76,6 +97,8 @@ export { ProductService } from './lib/product.service';
 ```
 
 ### Step 3: Create the Product List Component
+
+Create the file `product-list.component.ts` in `libs/products/feature/src/lib/`:
 
 ```typescript
 // libs/products/feature/src/lib/product-list.component.ts
@@ -94,7 +117,8 @@ import { ProductService } from '@mfe-platform/products-data-access';
     <div class="product-grid">
       @for (product of products(); track product.id) {
         <div class="product-card">
-          <h3>{{ product.name }}</h3>
+          <img [src]="product.thumbnail" [alt]="product.title" />
+          <h3>{{ product.title }}</h3>
           <p>{{ product.price | currency }}</p>
           <a [routerLink]="[product.id]">View Details</a>
         </div>
@@ -114,6 +138,11 @@ import { ProductService } from '@mfe-platform/products-data-access';
       border-radius: var(--border-radius, 8px);
       padding: var(--spacing-md, 16px);
     }
+    .product-card img {
+      width: 100%;
+      height: 180px;
+      object-fit: contain;
+    }
   `],
 })
 export class ProductListComponent {
@@ -131,6 +160,8 @@ export class ProductListComponent {
 
 ### Step 4: Create the Product Detail Component
 
+Create the file `product-detail.component.ts` in `libs/products/feature/src/lib/`:
+
 ```typescript
 // libs/products/feature/src/lib/product-detail.component.ts
 import { Component, inject } from '@angular/core';
@@ -145,9 +176,11 @@ import { ProductService } from '@mfe-platform/products-data-access';
   imports: [CurrencyPipe],
   template: `
     @if (product(); as p) {
-      <h2>{{ p.name }}</h2>
+      <img [src]="p.thumbnail" [alt]="p.title" style="max-width:300px;" />
+      <h2>{{ p.title }}</h2>
       <p>{{ p.description }}</p>
       <p class="price">{{ p.price | currency }}</p>
+      <p>Category: {{ p.category }} | Rating: {{ p.rating }}/5 | Stock: {{ p.stock }}</p>
     } @else {
       <p>Loading...</p>
     }
@@ -162,7 +195,7 @@ export class ProductDetailComponent {
     this.route.paramMap.pipe(
       switchMap((params) => {
         const id = params.get('id');
-        return id ? this.productService.getById(id) : of(null);
+        return id ? this.productService.getById(Number(id)) : of(null);
       })
     ),
     { initialValue: null }
@@ -211,7 +244,7 @@ export const remoteRoutes: Route[] = [
 npx nx serve mfe_products
 ```
 
-Navigate to `http://localhost:4201`. The products feature runs independently using its own `bootstrap.ts` and `app.config.ts` (with providers). This is useful for focused development without starting the full system.
+Navigate to `http://localhost:4201`. You should see a grid of products loaded from the DummyJSON API, each showing a thumbnail, title, and price. Click any product to see its detail page. The products feature runs independently using its own `bootstrap.ts` and `app.config.ts` (with providers). This is useful for focused development without starting the full system.
 
 ### Step 8: Verify in the Shell
 
@@ -219,7 +252,7 @@ Navigate to `http://localhost:4201`. The products feature runs independently usi
 npx nx serve shell
 ```
 
-Navigate to `http://localhost:4200/products`. The shell loads the products remote via Module Federation. You should see the product list rendered inside the shell's layout.
+Navigate to `http://localhost:4200/products`. The shell loads the products remote via Module Federation. You should see the same product grid, now rendered inside the shell's layout. This confirms that the remote loads correctly, the shared `HttpClient` provider works, and the DummyJSON API is accessible.
 
 > **What just happened?**
 >
@@ -228,6 +261,10 @@ Navigate to `http://localhost:4200/products`. The shell loads the products remot
 > - [x] Built `ProductListComponent` and `ProductDetailComponent` in the products feature library
 > - [x] Updated `entry.routes.ts` to lazy-load from the feature library
 > - [x] Verified standalone mode on port 4201 and integrated mode via the shell on port 4200
+
+> **Tip:** This guide uses [DummyJSON](https://dummyjson.com) as a free public API so you can see real data immediately. DummyJSON also provides endpoints for users, carts, and authentication that you can use when building out the `mfe_orders` and `mfe_account` remotes. See `https://dummyjson.com/docs` for the full API reference.
+
+> **Note:** The `mfe_orders` and `mfe_account` remotes still use their generated placeholder components. Building them out follows the same pattern you just completed: define models in `shared-models`, create services in the `data-access` library, build components in the `feature` library, and update `entry.routes.ts`. This is left as an exercise since the pattern is identical.
 
 With features built, let's look at how to work efficiently during development. That's Chapter 8.
 
@@ -277,6 +314,12 @@ If clicking a remote link shows a blank page or a loading error:
 1. Nx discovers remotes from the project graph. Verify that all remote projects were generated with `--host=shell` or were listed in the original `--remotes` flag.
 2. Check that `module-federation.manifest.json` has the correct localhost URLs.
 3. Open the browser DevTools Network tab and look for failed requests to `mf-manifest.json` or `remoteEntry.mjs`.
+
+> **What just happened?**
+>
+> - [x] Understood dev remotes (HMR, live reload) vs. static remotes (cached, fast startup)
+> - [x] Used `--devRemotes` to focus development on a single remote
+> - [x] Learned troubleshooting steps when `nx serve shell` does not load remotes
 
 Now that the development workflow is clear, let's look at how microfrontends communicate with each other. That's Chapter 9.
 
@@ -341,6 +384,8 @@ Custom events use the browser's native event system. They work across any framew
 - **Use shared services for global concerns:** auth, user context, theming, error handling.
 - **Use custom events only for loose notifications**, not request-response patterns.
 - **Document contracts:** Put event names, payload types, and service interfaces in `@mfe-platform/shared-models` so all teams can see them.
+
+> **Note:** If your application requires complex state management (NgRx, SignalStore), place the store in a shared library tagged with `scope:shared`. The same singleton sharing mechanism that works for `AuthService` applies to state management libraries. Each MFE can dispatch actions and select state from the shared store, as long as the library is shared as a singleton through Module Federation.
 
 With communication patterns established, let's tackle the last piece of the local development story: preventing styles from leaking between MFEs. That's Chapter 10.
 

@@ -21,6 +21,7 @@ You are a **frontend developer, not a DevOps engineer**. A separate DevOps team 
 - **Angular CLI basics**: you know what `ng serve` and `ng generate component` do
 - **Standalone components**: you have used `@Component({ ... })` and `provideRouter()`
 - **Basic terminal comfort**: you can run commands and read their output
+- **Docker** (24+, optional): needed only for local integration testing in Chapters 11 and 13. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) before reaching those chapters.
 
 ## Technology Versions
 

@@ -88,7 +88,7 @@ You will interact with Nx commands and Angular code. Under the hood, several lay
 
 | Layer | Technology | Role |
 |---|---|---|
-| Monorepo | Nx 22 | Workspace management, caching, affected builds, module boundaries, generators |
+| Monorepo | Nx 22.x | Workspace management, caching, affected builds, module boundaries, generators |
 | Shell (Host) | Angular 21 + Webpack | Container app: layout, navigation, auth, loads remotes via federation |
 | Remotes (MFEs) | Angular 21 + Webpack | Feature apps: each exposes routes/components consumed by the shell |
 | Shared Libraries | Nx libs (`@mfe-platform/...`) | UI components, services, models, utilities shared as singletons at runtime |
@@ -125,6 +125,8 @@ cd mfe-platform
 > **Note:** The `--nxCloud=skip` flag skips Nx Cloud setup. You can enable it later for remote caching. Nx Cloud stores build artifacts on a shared server. When a teammate (or CI) has already built a project, your machine downloads the cached result instead of rebuilding. This is optional and can be enabled later. The `apps` preset (as opposed to `angular-monorepo`) avoids generating any application upfront. (The `angular-monorepo` preset would generate a single Angular application automatically, which we do not want because we will generate the host with Module Federation wiring instead.)
 
 > **Note:** The `apps/` directory is created by the host generator in Step 3, not by the workspace preset.
+
+> **Note:** Commands in this guide use `\` for line continuation, which works in bash, zsh, and Git Bash. On Windows CMD, use `^` instead. On PowerShell, use `` ` ``. Alternatively, paste each command on a single line without the continuation characters.
 
 ### Step 2: Install the Angular Plugin
 
@@ -214,7 +216,7 @@ Confirm you see `@nx/angular`, `@nx/module-federation`, and Angular 21.x in the 
 npx nx serve shell
 ```
 
-Navigate to `http://localhost:4200`. You should see the shell with navigation links. Clicking a link loads the remote's placeholder `RemoteEntry` component via Module Federation. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
+Navigate to `http://localhost:4200`. You should see the Nx welcome page with links for each remote. Clicking a link (e.g., the mfe_products link) loads that remote's placeholder component via Module Federation. We will replace this welcome page with a proper layout later. Clicking a link loads the remote's placeholder `RemoteEntry` component via Module Federation. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
 
 > **What just happened?**
 >
