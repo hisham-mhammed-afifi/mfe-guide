@@ -132,9 +132,10 @@ cd mfe-platform
 
 ```bash
 npm install @nx/angular@22.4.5
+npm install @angular/animations@"~21.1.0"
 ```
 
-This single package installs Angular, Webpack, and all the Module Federation infrastructure that Nx needs. You do not need to install `@module-federation/enhanced` or any Webpack packages separately.
+The `@nx/angular` package installs Angular, Webpack, and all the Module Federation infrastructure that Nx needs. You do not need to install `@module-federation/enhanced` or any Webpack packages separately. The second command installs `@angular/animations`, which is required by `provideAnimationsAsync()` (used in Chapter 5) but is not included automatically by `@nx/angular`.
 
 ### Step 3: Generate the Shell and All Remotes
 
@@ -195,6 +196,7 @@ mfe-platform/
     mfe_account-e2e/             # E2E tests for account remote
   nx.json                       # Nx workspace configuration
   tsconfig.base.json            # Shared TypeScript config
+  vitest.workspace.ts           # Vitest workspace configuration (auto-generated)
   package.json                  # Single dependency tree for all apps
 ```
 
@@ -217,6 +219,8 @@ npx nx serve shell
 ```
 
 Navigate to `http://localhost:4200`. You should see the Nx welcome page with links for each remote. Clicking a link (e.g., the mfe_products link) loads that remote's placeholder component via Module Federation. We will replace this welcome page with a proper layout later. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
+
+> **Note:** The first time you run `npx nx serve shell`, Nx must build all three remotes from scratch before the shell can start. This can take several minutes depending on your machine. Subsequent runs are much faster because Nx caches the build output and skips unchanged projects.
 
 > **What just happened?**
 >

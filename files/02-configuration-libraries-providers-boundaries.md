@@ -48,17 +48,32 @@ The `{ dts: false }` option disables automatic TypeScript declaration generation
 
 You never touch this file unless you need advanced customization. Each remote also gets a `webpack.prod.config.ts` for production build overrides. The shell does not have one; it uses the same `webpack.config.ts` for both development and production.
 
-The generated `webpack.prod.config.ts` for each remote is minimal:
+The generated `webpack.prod.config.ts` for each remote uses a spread pattern that allows production overrides:
 
 ```typescript
 // apps/mfe_products/webpack.prod.config.ts
 import { withModuleFederation } from '@nx/module-federation/angular';
 import config from './module-federation.config';
 
-export default withModuleFederation(config, { dts: false });
+export default withModuleFederation(
+  {
+    ...config,
+    /*
+     * Remote overrides for production.
+     * Each entry is a pair of a unique name and the URL where it is deployed.
+     *
+     * e.g.
+     * remotes: [
+     *   ['app1', 'https://app1.example.com'],
+     *   ['app2', 'https://app2.example.com'],
+     * ]
+     */
+  },
+  { dts: false },
+);
 ```
 
-In most projects this file is identical to `webpack.config.ts`. It exists as a separate entry point so you can add production-only Webpack plugins (such as bundle analyzers) without affecting development builds.
+This file exists as a separate entry point so you can add production-only overrides (such as static remote URLs or bundle analyzers) without affecting development builds. The `...config` spread copies your base Module Federation configuration, and you can add or override properties below it.
 
 ### Shell: main.ts (The Dynamic Bootstrap)
 
@@ -199,16 +214,18 @@ export const remoteRoutes: Route[] = [
 ```typescript
 // apps/mfe_products/src/app/remote-entry/entry.ts
 import { Component } from '@angular/core';
+import { NxWelcome } from './nx-welcome';
 
 @Component({
   // No `standalone: true` needed: it is the default since Angular 19
+  imports: [NxWelcome],
   selector: 'app-mfe_products-entry',
-  template: `<p>mfe_products remote entry works!</p>`,
+  template: `<app-nx-welcome></app-nx-welcome>`,
 })
 export class RemoteEntry {}
 ```
 
-> **Note:** The generator also includes an `NxWelcome` component in the entry template. This is a placeholder welcome page from Nx. You will remove it when you replace the entry component with real features in Chapter 7.
+> **Note:** `NxWelcome` is a placeholder welcome page from Nx. Each remote has its own `nx-welcome.ts` file that the generator creates automatically. You will remove this import and replace the template with real features in Chapter 7.
 
 When the shell navigates to `/products`, Module Federation loads `entry.routes.ts` from the remote, and Angular renders `RemoteEntry` inside the shell's `<router-outlet>`.
 
@@ -236,44 +253,48 @@ npx nx g @nx/angular:library \
   --directory=libs/shared/ui \
   --name=shared-ui \
   --importPath=@mfe-platform/shared-ui \
-  --changeDetection=OnPush
+  --changeDetection=OnPush \
+  --no-interactive
 
 # Shared data access (AuthService, guards, interceptors)
 npx nx g @nx/angular:library \
   --directory=libs/shared/data-access-auth \
   --name=shared-data-access-auth \
-  --importPath=@mfe-platform/shared-data-access-auth
+  --importPath=@mfe-platform/shared-data-access-auth \
+  --no-interactive
 
 # Shared TypeScript interfaces (no Angular dependency needed)
 npx nx g @nx/js:library \
   --directory=libs/shared/models \
   --name=shared-models \
-  --importPath=@mfe-platform/shared-models
+  --importPath=@mfe-platform/shared-models \
+  --no-interactive
 
 # Shared utility functions
 npx nx g @nx/js:library \
   --directory=libs/shared/utils \
   --name=shared-utils \
-  --importPath=@mfe-platform/shared-utils
+  --importPath=@mfe-platform/shared-utils \
+  --no-interactive
 
 # Domain-specific libraries
 npx nx g @nx/angular:library --directory=libs/products/feature \
-  --name=products-feature --importPath=@mfe-platform/products-feature
+  --name=products-feature --importPath=@mfe-platform/products-feature --no-interactive
 npx nx g @nx/angular:library --directory=libs/products/data-access \
-  --name=products-data-access --importPath=@mfe-platform/products-data-access
+  --name=products-data-access --importPath=@mfe-platform/products-data-access --no-interactive
 npx nx g @nx/angular:library --directory=libs/orders/feature \
-  --name=orders-feature --importPath=@mfe-platform/orders-feature
+  --name=orders-feature --importPath=@mfe-platform/orders-feature --no-interactive
 npx nx g @nx/angular:library --directory=libs/orders/data-access \
-  --name=orders-data-access --importPath=@mfe-platform/orders-data-access
+  --name=orders-data-access --importPath=@mfe-platform/orders-data-access --no-interactive
 npx nx g @nx/angular:library --directory=libs/account/feature \
-  --name=account-feature --importPath=@mfe-platform/account-feature
+  --name=account-feature --importPath=@mfe-platform/account-feature --no-interactive
 npx nx g @nx/angular:library --directory=libs/account/data-access \
-  --name=account-data-access --importPath=@mfe-platform/account-data-access
+  --name=account-data-access --importPath=@mfe-platform/account-data-access --no-interactive
 ```
 
 > **Note:** Two different generators are used above. `@nx/angular:library` creates a library that includes Angular infrastructure (component scaffolding, Angular-aware build config). Use it for libraries that contain Angular components, directives, pipes, or services. `@nx/js:library` creates a plain TypeScript library with no Angular dependency. Use it for pure data (interfaces, types) and utility functions that have no Angular imports. The shared models and utils libraries use `@nx/js:library` because they contain only TypeScript interfaces and pure functions.
 
-> **Note:** `@nx/js:library` generates Jest configuration by default, while `@nx/angular:library` generates Vitest configuration. Your pure TypeScript libraries (`shared-models`, `shared-utils`) will use Jest for testing. This works fine alongside Vitest in the same workspace.
+> **Note:** `@nx/js:library` generates Jest configuration by default, while `@nx/angular:library` generates Vitest configuration. Your pure TypeScript libraries (`shared-models`, `shared-utils`) will use Jest for testing. This works fine alongside Vitest in the same workspace. Running `@nx/js:library` for the first time will also install Jest-related dependencies and create `jest.preset.js` and `jest.config.ts` at the workspace root.
 
 > **Warning:** In Nx 22, always use `--directory`, `--name`, and `--importPath` together. The `--directory` flag controls the folder location, `--name` sets the project name, and `--importPath` sets the TypeScript path alias in `tsconfig.base.json`. Without `--importPath`, Nx derives a default that may not match what you expect.
 
@@ -437,7 +458,7 @@ This creates a rule you must follow:
 
 ### Shell: app.config.ts (The Source of Truth)
 
-> **Important:** The generator only includes `provideBrowserGlobalErrorListeners()` and `provideRouter(appRoutes)` in the shell's `app.config.ts`. You must manually add `provideHttpClient(withInterceptorsFromDi())`, `provideAnimationsAsync()`, and any other global providers your application needs. These are required for remotes to function correctly when loaded inside the shell.
+> **Important:** The generator only includes `provideBrowserGlobalErrorListeners()` and `provideRouter(appRoutes)` in the shell's `app.config.ts`. You must manually add `provideHttpClient(withInterceptorsFromDi())`, `provideAnimationsAsync()`, and any other global providers your application needs. These are required for remotes to function correctly when loaded inside the shell. If the build fails with `Module not found: Error: Can't resolve '@angular/animations/browser'`, you need to install `@angular/animations` (see Step 2 in Chapter 2).
 
 Open `apps/shell/src/app/app.config.ts` and replace its contents with the following:
 
@@ -522,6 +543,8 @@ bootstrapApplication(RemoteEntry, appConfig)
 
 > **Note:** The remote's `bootstrap.ts` bootstraps the `RemoteEntry` component (not a separate `App` component). When the remote runs standalone, this entry component serves as the root. When loaded inside the shell via Module Federation, `bootstrap.ts` is never executed; the shell loads only `entry.routes.ts`.
 
+> **Note:** Unlike the shell, remote apps do NOT have an `App` component or `app.html` file. The generator creates `RemoteEntry` as the root component for remotes. The shell is the only app with a separate `App` component, layout template, and navigation.
+
 ### The `NullInjectorError: No provider for HttpClient` Problem
 
 This is the **#1 runtime error** in Angular MFE setups. It happens when:
@@ -564,13 +587,18 @@ At that point, you can delete `entry.ts` (the `RemoteEntry` file). It is only a 
 ```typescript
 // apps/mfe_products/src/app/app.routes.ts
 import { Route } from '@angular/router';
-import { remoteRoutes } from './remote-entry/entry.routes';
 
 // Wrap the remote routes so they work as a standalone app
 export const appRoutes: Route[] = [
-  { path: '', children: remoteRoutes },
+  {
+    path: '',
+    loadChildren: () =>
+      import('./remote-entry/entry.routes').then((m) => m.remoteRoutes),
+  },
 ];
 ```
+
+> **Note:** The generated code uses `loadChildren` with a dynamic import rather than a static `children` array. This keeps the remote entry lazily loaded even in standalone mode, matching how the shell loads it via Module Federation.
 
 ### Router Outlets: Where Remote Content Renders
 
@@ -600,7 +628,7 @@ export class App {}
 </nav>
 <main>
   <!-- Remote content renders HERE -->
-  <router-outlet />
+  <router-outlet></router-outlet>
 </main>
 ```
 

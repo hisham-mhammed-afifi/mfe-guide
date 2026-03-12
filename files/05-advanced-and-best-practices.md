@@ -8,7 +8,50 @@
 
 So far, each remote exposes a set of routes (`./Routes`). You can also expose individual components for granular composition. For example, let the shell embed a `ProductCardComponent` from the products remote on the home page.
 
-Update the remote's federation config to expose an additional entry:
+First, create the component in the products feature library:
+
+```typescript
+// libs/products/feature/src/lib/product-card.component.ts
+import { Component, input } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
+import { Product } from '@mfe-platform/shared-models';
+
+@Component({
+  selector: 'app-product-card',
+  imports: [CurrencyPipe],
+  template: `
+    <div class="product-card">
+      <img [src]="product().thumbnail" [alt]="product().title" />
+      <h3>{{ product().title }}</h3>
+      <p>{{ product().price | currency }}</p>
+    </div>
+  `,
+  styles: [`
+    .product-card {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .product-card img {
+      max-width: 100%;
+      height: 150px;
+      object-fit: contain;
+    }
+  `],
+})
+export class ProductCardComponent {
+  product = input.required<Product>();
+}
+```
+
+Export it from the library's public API by adding to `libs/products/feature/src/index.ts`:
+
+```typescript
+export { ProductCardComponent } from './lib/product-card.component';
+```
+
+Now update the remote's federation config to expose this component as an additional entry:
 
 ```typescript
 // apps/mfe_products/module-federation.config.ts

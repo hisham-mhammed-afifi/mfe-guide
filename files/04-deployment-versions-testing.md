@@ -47,15 +47,19 @@ The output for each app lands in `dist/apps/<name>/` and contains:
 dist/apps/mfe_products/
   index.html              # The SPA entry point
   main.[hash].js          # Application code (content-hashed filename)
-  polyfills.[hash].js     # Browser polyfills (content-hashed)
-  remoteEntry.mjs          # Module Federation entry (NOT hashed)
+  remoteEntry.mjs         # Module Federation entry (NOT hashed)
+  mf-manifest.json        # Federation manifest describing exposed modules
   styles.[hash].css       # Compiled stylesheets
-  assets/                 # Static assets
+  favicon.ico             # Default favicon
 ```
+
+> **Note:** Angular 21 zoneless apps do not generate a separate `polyfills.[hash].js` file. There is also no `assets/` directory unless you explicitly add assets to the project configuration.
 
 > **Warning:** `remoteEntry.mjs` is the file that Module Federation uses to discover what a remote exposes. Unlike other JS files, it is **not content-hashed**. Its filename stays the same across builds, but its contents change. This has critical implications for caching (covered below).
 
 > **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfe_products --configuration=production` and checking the output.
+
+> **Note:** During builds, you may see a warning: `Could not find a version for "@angular/animations" in the root "package.json" when collecting shared packages for the Module Federation setup.` This is a cosmetic warning from Module Federation's dependency scanning. As long as `@angular/animations` is installed (see Chapter 2 Step 2), the build output works correctly.
 
 ### The Manifest File
 
@@ -124,7 +128,8 @@ RUN npx nx build ${APP_NAME} --configuration=${CONFIGURATION}
 # ============================================
 # Stage 3: Serve with nginx (tiny ~25 MB image)
 # ============================================
-FROM nginx:1.28-alpine AS server
+# Use nginx:alpine for the latest stable nginx on Alpine Linux
+FROM nginx:alpine AS server
 ARG APP_NAME
 # Copy only the built static files into the nginx html directory
 COPY --from=builder /app/dist/apps/${APP_NAME} /usr/share/nginx/html
@@ -535,12 +540,11 @@ Each library and app has its own unit tests. Run them individually or for the wh
 # Test a specific library
 npx nx test products-data-access
 
-# Test a specific app
-npx nx test mfe_products
-
 # Test only projects affected by your changes
 npx nx affected -t test
 ```
+
+> **Note:** Remote apps (`mfe_products`, `mfe_orders`, `mfe_account`) have no generated test files. Running `npx nx test mfe_products` will fail with "No test files found." Your unit tests live in the shared libraries (like `products-data-access`), not in the remote apps themselves. Run `npx nx test products-data-access` to test the product service, for example.
 
 Vitest output uses a tree format with checkmarks:
 
