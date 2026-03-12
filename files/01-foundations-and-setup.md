@@ -216,7 +216,7 @@ Confirm you see `@nx/angular`, `@nx/module-federation`, and Angular 21.x in the 
 npx nx serve shell
 ```
 
-Navigate to `http://localhost:4200`. You should see the Nx welcome page with links for each remote. Clicking a link (e.g., the mfe_products link) loads that remote's placeholder component via Module Federation. We will replace this welcome page with a proper layout later. Clicking a link loads the remote's placeholder `RemoteEntry` component via Module Federation. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
+Navigate to `http://localhost:4200`. You should see the Nx welcome page with links for each remote. Clicking a link (e.g., the mfe_products link) loads that remote's placeholder component via Module Federation. We will replace this welcome page with a proper layout later. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
 
 > **What just happened?**
 >
