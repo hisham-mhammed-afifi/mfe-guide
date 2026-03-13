@@ -62,7 +62,7 @@ Create the file `product.service.ts` in `libs/products/data-access/src/lib/`:
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { map } from 'rxjs';
 import { Product } from '@mfe-platform/shared-models';
 
 // Response wrapper: DummyJSON wraps products in an object
@@ -101,10 +101,12 @@ export { ProductService } from './lib/product.service';
 Create the file `product-list.component.ts` in `libs/products/feature/src/lib/`:
 
 > **MFE Gotcha: Do not use `toSignal()` in remote components.**
-> Module Federation can load multiple Angular instances. `toSignal()` relies on an injection context
-> that may belong to a different Angular instance than the one running your remote, causing `NG0203`.
-> Use `signal()` with a manual subscription in `ngOnInit` / `ngOnDestroy` instead.
-> This also applies to other DI-dependent reactive helpers like `toObservable()`.
+> `toSignal()` registers an internal effect that requires an active injection context at the moment it
+> is called. In a Module Federation remote, the injection context may not be correctly active when
+> the component class is being constructed by the lazy-loaded route, so the call fails with `NG0203`.
+> Moving the subscription into `ngOnInit`, which runs after the component is fully attached to the
+> injector tree, avoids the problem. Use `signal()` with a manual subscription in `ngOnInit` /
+> `ngOnDestroy` instead. This also applies to other DI-dependent reactive helpers like `toObservable()`.
 
 ```typescript
 // libs/products/feature/src/lib/product-list.component.ts
@@ -308,7 +310,7 @@ When you run `nx serve shell`, Nx needs to serve all the remotes alongside the s
 npx nx serve shell
 ```
 
-Nx reads the `remotes` array in the shell's `module-federation.config.ts` to discover which remote projects exist. It builds each remote (or restores from cache) and serves them all statically alongside the shell. Unchanged remotes are restored from Nx's local cache instantly. With Nx Cloud remote caching enabled, even a fresh machine gets cached artifacts, making the full system start in seconds instead of minutes.
+Nx discovers which remotes belong to the shell by reading the project graph, which was configured automatically when you ran the host generator with `--remotes`. The `remotes` array in `module-federation.config.ts` is empty for dynamic federation setups. Nx builds each remote (or restores from cache) and serves them all statically alongside the shell. Unchanged remotes are restored from Nx's local cache instantly. With Nx Cloud remote caching enabled, even a fresh machine gets cached artifacts, making the full system start in seconds instead of minutes.
 
 > **Note:** **Nx's local cache** stores build results on your machine. If a project has not changed since the last build, `nx serve` or `nx build` restores the output from cache instead of rebuilding. **Nx Cloud remote caching** (optional, enabled by connecting to Nx Cloud) uploads these cached results to a shared server. When a teammate or CI machine needs the same build, it downloads the cached result instead of rebuilding from scratch. This is how "even a fresh machine gets cached artifacts." A cache miss occurs when the project's source files, dependencies, or configuration have changed since the last cached build. Changing a file in `shared/ui` invalidates the cache for ALL projects that depend on it.
 
@@ -353,6 +355,8 @@ Now that the development workflow is clear, let's look at how microfrontends com
 Since Angular runs as a singleton, `@Injectable({ providedIn: 'root' })` services in shared libraries are instantiated once and shared across all microfrontends:
 
 ```typescript
+import { AuthService } from '@mfe-platform/shared-data-access-auth';
+
 @Injectable({ providedIn: 'root' })
 export class AuthService { /* ... */ }
 
@@ -377,24 +381,38 @@ export const currentUser = signal<User | null>(null);
 export const isAuthenticated = computed(() => currentUser() !== null);
 ```
 
-> **Warning:** Module-level signals are shared across microfrontends **only because** Module Federation resolves this library as a singleton. If someone changes the sharing config (removes `singleton: true` for this library), each MFE gets its **own copy** of these signals. State silently stops syncing with **no error message**. This is one of the hardest bugs to debug.
+> **Warning:** Module-level signals are shared across microfrontends **only because** Module Federation resolves this library as a singleton. This risk arises only if someone manually overrides the Module Federation sharing config to remove `singleton: true` for this library. By default, `withModuleFederation` sets all workspace libraries as shared singletons automatically. If that override ever happens, each MFE gets its **own copy** of these signals and state silently stops syncing with **no error message** — one of the hardest bugs to debug.
 >
 > **Recommendation:** Prefer `@Injectable({ providedIn: 'root' })` services with signals inside them (like the `AuthService` in Chapter 4). Angular's DI-based singletons are tied to the shared root injector and are more robust than module-level singletons that depend on Module Federation config.
 
 ### Pattern 3: Custom Events (Framework-Agnostic Fallback)
 
-For loose notifications between microfrontends that do not need request-response patterns:
+For loose notifications between microfrontends that do not need request-response patterns. Always store the handler reference so you can remove it in `ngOnDestroy` — failing to do so causes a memory leak:
 
 ```typescript
-// Dispatch from mfe_products (e.g., when user adds item to cart)
+// In mfe_products — dispatch when user adds item to cart
 window.dispatchEvent(new CustomEvent('cart:add', {
   detail: { productId: '123', qty: 1 },
 }));
 
-// Listen in mfe_orders (e.g., to update cart badge count)
-window.addEventListener('cart:add', ((e: CustomEvent) => {
-  console.log('Item added:', e.detail);
-}) as EventListener);
+// In mfe_orders — listen and clean up properly
+import { Component, OnInit, OnDestroy } from '@angular/core';
+
+@Component({ /* ... */ })
+export class CartBadgeComponent implements OnInit, OnDestroy {
+  // Store the handler so we can remove it in ngOnDestroy
+  private readonly cartAddHandler = ((e: CustomEvent) => {
+    console.log('Item added:', e.detail);
+  }) as EventListener;
+
+  ngOnInit(): void {
+    window.addEventListener('cart:add', this.cartAddHandler);
+  }
+
+  ngOnDestroy(): void {
+    window.removeEventListener('cart:add', this.cartAddHandler);
+  }
+}
 ```
 
 Custom events use the browser's native event system. They work across any framework, which makes them useful if you ever have a non-Angular microfrontend. The trade-off is no type safety and no Angular change detection integration.

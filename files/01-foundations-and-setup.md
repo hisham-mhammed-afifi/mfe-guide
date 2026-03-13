@@ -137,6 +137,8 @@ npm install @angular/animations@"~21.1.0"
 
 The `@nx/angular` package installs Angular, Webpack, and all the Module Federation infrastructure that Nx needs. You do not need to install `@module-federation/enhanced` or any Webpack packages separately. The second command installs `@angular/animations`, which is required by `provideAnimationsAsync()` (used in Chapter 5) but is not included automatically by `@nx/angular`.
 
+> **Note:** `npm install @nx/angular@22.4.5` also installs `@nx/module-federation` and `@module-federation/enhanced` as transitive dependencies. If you encounter import errors for `@nx/module-federation/angular` later, run `npm install @nx/module-federation@22.4.5` explicitly.
+
 ### Step 3: Generate the Shell and All Remotes
 
 This is the key step. Nx's `@nx/angular:host` generator creates the shell application, generates all specified remotes, wires Module Federation config, configures routing, splits `main.ts`/`bootstrap.ts`, and creates the dynamic manifest. All in one command:
@@ -196,7 +198,7 @@ mfe-platform/
     mfe_account-e2e/             # E2E tests for account remote
   nx.json                       # Nx workspace configuration
   tsconfig.base.json            # Shared TypeScript config
-  vitest.workspace.ts           # Vitest workspace configuration (auto-generated)
+  vitest.workspace.mts          # Vitest workspace configuration (auto-generated)
   package.json                  # Single dependency tree for all apps
 ```
 
@@ -233,5 +235,10 @@ Navigate to `http://localhost:4200`. You should see the Nx welcome page with lin
 > - [x] Running `nx serve shell` builds all remotes and serves the full system on `localhost:4200`
 
 If it works, the foundation is solid. You now have a fully wired dynamic microfrontend architecture with zero manual Webpack configuration.
+
+> **If something went wrong:**
+> - **Port already in use:** Another process is on port 4200–4203. Kill it with `lsof -ti:4200 | xargs kill` (Mac/Linux) or `netstat -ano | findstr :4200` then `taskkill /PID <pid> /F` (Windows).
+> - **Webpack build error:** Verify your Node.js version with `node -v` (20+ required, 22.x LTS recommended).
+> - **Remote link shows blank page:** Open browser DevTools console. Look for CORS or manifest URL errors. Verify `module-federation.manifest.json` URLs match the running remote ports (4201–4203).
 
 Everything that follows builds on this foundation. In the next chapter, we walk through every generated file line by line so you understand exactly what Nx created and why.

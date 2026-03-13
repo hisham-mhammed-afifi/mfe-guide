@@ -310,7 +310,7 @@ exec nginx -g "daemon off;"
 
 In ECS, these environment variables come from the **task definition** (a JSON configuration that tells ECS how to run a container). In EKS (Kubernetes), they come from a **ConfigMap** (a Kubernetes resource that stores configuration as key-value pairs).
 
-> **Note:** The `entrypoint.sh` script is used only in ECS/EKS container deployments (Approach B above). The `docker-compose.yml` in this guide uses Approach A: the dev manifest file is already present in the build output, so no entrypoint injection is needed.
+> **Note:** The `docker-compose.yml` in this guide does **not** invoke `entrypoint.sh`. The shell's dev shell manifest is already present in the build output, so no entrypoint injection is needed locally. The `entrypoint.sh` script is for production container deployments (ECS/EKS) where environment variables inject the shell manifest at container startup (Approach B above).
 
 ### CI/CD Pipeline (Reference for DevOps)
 
@@ -344,10 +344,10 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # Full history needed for nx affected
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
@@ -364,10 +364,10 @@ jobs:
       matrix:
         app: [shell, mfe_products, mfe_orders, mfe_account]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
@@ -532,9 +532,13 @@ Now let's look at how to test the composed system effectively. That's Chapter 13
 
 > **Note:** Angular 21 made Vitest the default test runner, replacing Karma/Jasmine. Nx 22.3+ supports Vitest for Angular projects via the `@analogjs/vite-plugin-angular` Vite plugin, which enables Angular's TestBed to work within a Vitest environment. All test files use the standard `.spec.ts` extension. The `nx test` command runs Vitest in single-run mode by default (the generated `vite.config.mts` sets `watch: false`). Add the `--watch` flag for continuous testing during local development: `npx nx test mfe_products --watch`. Angular's `TestBed`, `HttpTestingController`, and other testing utilities work the same way with Vitest as they did with previous test runners.
 
+`vitest.workspace.mts` at the workspace root aggregates all per-project `vite.config.mts` files into one workspace-level Vitest configuration. Nx manages this file automatically — you should not need to edit it unless you are adding custom Vitest workspace-level configuration (such as global setup files).
+
 ### Unit Testing
 
 Each library and app has its own unit tests. Run them individually or for the whole workspace:
+
+> **Note on test runners:** `npx nx affected -t test` runs each project with its configured test runner. Projects generated with `@nx/angular:library` use Vitest; projects generated with `@nx/js:library` use Jest by default (unless you added `--unitTestRunner=vitest` during generation). Both runners work side by side. Jest output format differs from Vitest's tree output shown in this chapter. To run tests for a Jest-configured library: `npx nx test shared-models`.
 
 ```bash
 # Test a specific library

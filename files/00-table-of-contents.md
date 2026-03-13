@@ -30,7 +30,7 @@ You are a **frontend developer, not a DevOps engineer**. A separate DevOps team 
 | Angular | 21.x | UI framework (standalone components, signals, zoneless by default, new control flow) |
 | Nx | 22.4.5 | Monorepo build system (caching, generators, boundaries) |
 | Webpack | 5.x | Bundler (required for Module Federation) |
-| `@module-federation/enhanced` | 0.x | Module Federation runtime (maintained by Zack Jackson and ByteDance) |
+| `@module-federation/enhanced` | 0.8.x | Module Federation runtime (maintained by Zack Jackson and ByteDance) |
 | `@nx/module-federation` | 22.4.5 | Nx's abstraction over Module Federation |
 | Vitest | 4.x | Unit test runner (Angular 21 default, replaces Karma/Jasmine) |
 | TypeScript | 5.9+ | Type system |

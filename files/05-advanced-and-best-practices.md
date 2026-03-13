@@ -96,7 +96,8 @@ If a remote is down or its CDN is unreachable, the shell should show a fallback 
 
 ```typescript
 // apps/shell/src/app/remote-unavailable.component.ts
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-remote-unavailable',
@@ -109,21 +110,21 @@ import { Component } from '@angular/core';
   `,
 })
 export class RemoteUnavailableComponent {
+  private readonly router = inject(Router);
+
   retry(): void {
-    window.location.reload();
+    // Re-navigate to the current URL without a full page reload.
+    // This preserves in-memory state (auth tokens, etc.) held by the shell.
+    const url = this.router.url;
+    this.router.navigateByUrl('/', { skipLocationChange: true })
+      .then(() => this.router.navigateByUrl(url));
   }
 }
 ```
 
-> **Note:** `window.location.reload()` is a simple fallback that causes a full page reload, losing all client-side state (auth tokens in memory, form data, navigation history). For a more robust production pattern, inject `Router` and re-navigate to the current URL instead:
->
-> ```typescript
-> retry(): void {
->   const url = this.router.url;
->   this.router.navigateByUrl('/', { skipLocationChange: true })
->     .then(() => this.router.navigateByUrl(url));
-> }
-> ```
+> **Note:** The `retry()` above uses Angular's `Router` to re-navigate to the current route, avoiding a full page reload that would lose all in-memory state (auth tokens, form data, navigation history). If you prefer the simpler `window.location.reload()` for a minimal example, replace the `router` field and `retry()` body accordingly.
+
+Replace `apps/shell/src/app/app.routes.ts` entirely with the following error-resilient version. This supersedes the basic version from Chapter 3:
 
 ```typescript
 // apps/shell/src/app/app.routes.ts
@@ -149,7 +150,7 @@ export const appRoutes: Route[] = [
 ];
 ```
 
-> **Note:** The error handling above covers network-level failures (remote unreachable or CDN down). A separate class of runtime errors occurs *inside* a remote once it loads. The most common is `NG0203: toSignal() can only be used within an injection context`, caused by multiple Angular instances in the Module Federation environment. This is not a loading failure and will not be caught by the `.catch()` above. See Chapter 7, Steps 3 and 4 for the safe `signal()` + `ngOnInit` pattern that avoids it, and Pitfall 14 in Chapter 15 for a full explanation.
+> **Note:** The error handling above covers network-level failures (remote unreachable or CDN down). A separate class of runtime errors occurs *inside* a remote once it loads. The most common is `NG0203: toSignal() can only be used within an injection context`, which happens when `toSignal()` is called before the component is fully attached to the injector tree. This is not a loading failure and will not be caught by the `.catch()` above. See Chapter 7, Steps 3 and 4 for the safe `signal()` + `ngOnInit` pattern that avoids it, and Pitfall 14 in Chapter 15 for a full explanation.
 
 ### How Do I Add a 4th Remote to an Existing Setup?
 
@@ -259,18 +260,18 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 | 7 | `nx serve shell` does not load remotes | Nx cannot discover remote projects | Verify remotes were generated with correct `--host` relationship. Check the project graph with `npx nx graph`. |
 | 8 | CORS errors loading `mf-manifest.json` in production | CDN missing CORS response headers | Ask your DevOps team to add `Access-Control-Allow-Origin` for the shell's domain on each remote's CDN |
 | 9 | Stale `remoteEntry.mjs` or `mf-manifest.json` after deploy | CloudFront default cache TTL too long | Ask your DevOps team to create a cache behavior for `/remoteEntry.mjs` and `/mf-manifest.json` with 60s TTL and invalidate on deploy |
-| 10 | Webpack required but esbuild is default | Angular 21 defaults to esbuild | The `@nx/angular:host` generator uses Webpack automatically. If you created the app differently, use `@nx/angular:convert-to-rspack` or reconfigure |
+| 10 | Webpack required but esbuild is default | Angular 21 defaults to esbuild | The `@nx/angular:host` and `@nx/angular:remote` generators automatically configure Webpack. This pitfall only applies if you created the app using `ng new` or a non-MFE generator. In that case, regenerate using the MFE generators or manually set the Webpack executor in `project.json`. |
 | 11 | Circular dependency between MFEs | Remote A imports from Remote B's library | Enforce scope boundaries. Extract shared code into a `scope:shared` library |
 | 12 | Docker build slow or no cache | `COPY . .` before `npm ci` | Use multi-stage builds. Copy `package.json` first, run `npm ci`, then copy source. Ask your DevOps team to verify |
 | 13 | Manifest not updated after deploy | Shell built with dev manifest, no injection step | Ask your DevOps team to always inject the environment manifest after build, before S3 sync or container start |
-| 14 | `NG0203: toSignal() can only be used within an injection context` in a remote | Multiple Angular instances in Module Federation break the DI context that `toSignal()` requires | Replace `toSignal()` with `signal()` + `ngOnInit` subscription. See Chapter 7, Steps 3–4 and Pitfall 14 below |
+| 14 | `NG0203: toSignal() can only be used within an injection context` in a remote | `toSignal()` requires an active injection context when called; in a lazy-loaded MFE route the component may be constructed before that context is active | Replace `toSignal()` with `signal()` + `ngOnInit` subscription. See Chapter 7, Steps 3–4 and Pitfall 14 below |
 | 15 | `Uncaught SyntaxError: Cannot use 'import.meta' outside a module` in `styles.js` | `withModuleFederation` sets `outputModule: true` + `publicPath: 'auto'`; Angular injects `styles.js` as a classic script that cannot contain `import.meta` | Override `output.publicPath: '/'` in the shell's `webpack.config.ts`. See Chapter 3 and Pitfall 15 below |
 
 ### Pitfall 14: toSignal() throws NG0203 in Module Federation Remotes
 
 **Symptom:** The browser console shows `ERROR RuntimeError: NG0203: toSignal() can only be used within an injection context` when navigating to a remote route. The stack trace points to the remote component's constructor or a class field initializer.
 
-**Root cause (brief):** Module Federation can load multiple Angular instances — one in the shell and one in the remote. `toSignal()` checks the injection context of its own Angular instance, which is never activated for the remote's components. The failure occurs whether `toSignal()` is called in a class field initializer or in the constructor, because neither context is valid across the instance boundary.
+**Root cause (brief):** `toSignal()` registers an internal effect that requires an active injection context at the moment it is called. In a Module Federation remote, the injection context may not be correctly active when the component class is being constructed by the lazy-loaded route, so the call fails with NG0203. The failure occurs whether `toSignal()` is called in a class field initializer or in the constructor, because neither context is reliably active during lazy route evaluation.
 
 **Fix:** Replace `toSignal()` with a plain `signal()` and subscribe manually in `ngOnInit`. `signal()` is a pure reactive primitive with no DI dependency; the subscription in `ngOnInit` runs after the component is fully initialized in the correct DI tree.
 
@@ -396,4 +397,6 @@ docker build --build-arg APP_NAME=mfe_account -t mfe-account:latest .
 ```
 
 **Environment variables (for ECS/EKS container deploy):**
-The shell container uses an entrypoint script that reads `MFE_PRODUCTS_URL`, `MFE_ORDERS_URL`, and `MFE_ACCOUNT_URL` to generate the mf-manifest.json format manifest at startup.
+The shell container uses an entrypoint script (`docker/entrypoint.sh`) that reads `MFE_PRODUCTS_URL`, `MFE_ORDERS_URL`, and `MFE_ACCOUNT_URL` to generate the shell manifest at startup.
+
+> **Note:** The local `docker-compose.yml` from Chapter 11 uses the dev shell manifest already present in the build output (Approach A from Chapter 11). The environment variable approach described here applies only to production container deployments (ECS/EKS) using Approach B.
