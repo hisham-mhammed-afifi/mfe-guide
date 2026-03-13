@@ -149,6 +149,8 @@ export const appRoutes: Route[] = [
 ];
 ```
 
+> **Note:** The error handling above covers network-level failures (remote unreachable or CDN down). A separate class of runtime errors occurs *inside* a remote once it loads. The most common is `NG0203: toSignal() can only be used within an injection context`, caused by multiple Angular instances in the Module Federation environment. This is not a loading failure and will not be caught by the `.catch()` above. See Chapter 7, Steps 3 and 4 for the safe `signal()` + `ngOnInit` pattern that avoids it, and Pitfall 14 in Chapter 15 for a full explanation.
+
 ### How Do I Add a 4th Remote to an Existing Setup?
 
 Use the `@nx/angular:remote` generator with the `--host` flag to wire it automatically:
@@ -244,7 +246,7 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 
 10. **Know what to hand off to DevOps.** You own the build commands, output paths, manifest format, and cache-busting requirements. DevOps owns the Docker, CI, and AWS infrastructure. Use the checklist from Chapter 11 to communicate clearly.
 
-### 13 Common Pitfalls
+### 15 Common Pitfalls
 
 | # | Pitfall | Cause | Solution |
 |---|---|---|---|
@@ -261,6 +263,57 @@ Now let's close with the practices and pitfalls that will keep your MFE architec
 | 11 | Circular dependency between MFEs | Remote A imports from Remote B's library | Enforce scope boundaries. Extract shared code into a `scope:shared` library |
 | 12 | Docker build slow or no cache | `COPY . .` before `npm ci` | Use multi-stage builds. Copy `package.json` first, run `npm ci`, then copy source. Ask your DevOps team to verify |
 | 13 | Manifest not updated after deploy | Shell built with dev manifest, no injection step | Ask your DevOps team to always inject the environment manifest after build, before S3 sync or container start |
+| 14 | `NG0203: toSignal() can only be used within an injection context` in a remote | Multiple Angular instances in Module Federation break the DI context that `toSignal()` requires | Replace `toSignal()` with `signal()` + `ngOnInit` subscription. See Chapter 7, Steps 3–4 and Pitfall 14 below |
+| 15 | `Uncaught SyntaxError: Cannot use 'import.meta' outside a module` in `styles.js` | `withModuleFederation` sets `outputModule: true` + `publicPath: 'auto'`; Angular injects `styles.js` as a classic script that cannot contain `import.meta` | Override `output.publicPath: '/'` in the shell's `webpack.config.ts`. See Chapter 3 and Pitfall 15 below |
+
+### Pitfall 14: toSignal() throws NG0203 in Module Federation Remotes
+
+**Symptom:** The browser console shows `ERROR RuntimeError: NG0203: toSignal() can only be used within an injection context` when navigating to a remote route. The stack trace points to the remote component's constructor or a class field initializer.
+
+**Root cause (brief):** Module Federation can load multiple Angular instances — one in the shell and one in the remote. `toSignal()` checks the injection context of its own Angular instance, which is never activated for the remote's components. The failure occurs whether `toSignal()` is called in a class field initializer or in the constructor, because neither context is valid across the instance boundary.
+
+**Fix:** Replace `toSignal()` with a plain `signal()` and subscribe manually in `ngOnInit`. `signal()` is a pure reactive primitive with no DI dependency; the subscription in `ngOnInit` runs after the component is fully initialized in the correct DI tree.
+
+```typescript
+// Do NOT use this pattern in remote components — causes NG0203:
+import { toSignal } from '@angular/core/rxjs-interop';
+
+export class ProductListComponent {
+  private readonly productService = inject(ProductService);
+  readonly products = toSignal(this.productService.getAll(), { initialValue: [] });
+}
+
+// Use this pattern instead — safe in all Module Federation contexts:
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { Product } from '@mfe-platform/shared-models';
+
+export class ProductListComponent implements OnInit, OnDestroy {
+  private readonly productService = inject(ProductService);
+  readonly products = signal<Product[]>([]);
+  private subscription?: Subscription;
+
+  ngOnInit(): void {
+    this.subscription = this.productService.getAll().subscribe(p => this.products.set(p));
+  }
+
+  ngOnDestroy(): void {
+    this.subscription?.unsubscribe();
+  }
+}
+```
+
+This also applies to `toObservable()` and any other helper from `@angular/core/rxjs-interop` that requires an injection context. See Chapter 7, Steps 3 and 4 for the complete working components (`ProductListComponent` and `ProductDetailComponent`).
+
+### Pitfall 15: styles.js throws 'Cannot use import.meta outside a module'
+
+**Symptom:** The browser console shows `Uncaught SyntaxError: Cannot use 'import.meta' outside a module (at styles.js:...)` immediately on page load of the shell. No user action or remote navigation is needed to trigger it.
+
+**Root cause (brief):** `withModuleFederation` sets both `experiments.outputModule: true` and `output.publicPath: 'auto'`. This causes Webpack to emit `import.meta.url` in every chunk — including `styles.js` — so it can resolve the public path at runtime. However, Angular hardcodes `styles.js` as a classic `<script defer>` tag (not `type="module"`), and `import.meta` is a parse-time syntax error in classic scripts.
+
+**Fix:** Override `output.publicPath` to `'/'` in the shell's `webpack.config.ts`. With a static path, Webpack does not need to generate `import.meta.url` in any chunk. See Chapter 3 for the complete shell `webpack.config.ts` with this override applied.
+
+> **Note:** This error affects only the shell, not remotes. Remote apps expose `remoteEntry.mjs`, which Angular injects as `type="module"` — `import.meta` is valid there. Remote `styles.js` files are never injected into the shell's HTML when loaded as federated modules, so remotes must keep `publicPath: 'auto'` to resolve their own chunks correctly.
 
 ### Performance Tips
 

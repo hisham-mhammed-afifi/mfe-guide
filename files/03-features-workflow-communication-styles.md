@@ -100,12 +100,19 @@ export { ProductService } from './lib/product.service';
 
 Create the file `product-list.component.ts` in `libs/products/feature/src/lib/`:
 
+> **MFE Gotcha: Do not use `toSignal()` in remote components.**
+> Module Federation can load multiple Angular instances. `toSignal()` relies on an injection context
+> that may belong to a different Angular instance than the one running your remote, causing `NG0203`.
+> Use `signal()` with a manual subscription in `ngOnInit` / `ngOnDestroy` instead.
+> This also applies to other DI-dependent reactive helpers like `toObservable()`.
+
 ```typescript
 // libs/products/feature/src/lib/product-list.component.ts
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CurrencyPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
+import { Product } from '@mfe-platform/shared-models';
 import { ProductService } from '@mfe-platform/products-data-access';
 
 @Component({
@@ -145,18 +152,25 @@ import { ProductService } from '@mfe-platform/products-data-access';
     }
   `],
 })
-export class ProductListComponent {
+export class ProductListComponent implements OnInit, OnDestroy {
   private readonly productService = inject(ProductService);
 
-  // toSignal converts the Observable into a signal for template use
-  readonly products = toSignal(
-    this.productService.getAll(),
-    { initialValue: [] }
-  );
+  // signal() is a plain reactive primitive with no DI dependency.
+  // We subscribe in ngOnInit, after the component is fully initialized in the correct DI tree.
+  readonly products = signal<Product[]>([]);
+  private subscription?: Subscription;
+
+  ngOnInit(): void {
+    this.subscription = this.productService.getAll().subscribe(p => this.products.set(p));
+  }
+
+  ngOnDestroy(): void {
+    this.subscription?.unsubscribe();
+  }
 }
 ```
 
-> **Warning:** `toSignal` is from `@angular/core/rxjs-interop` (not `@angular/core`). `RouterLink` must be in the `imports` array. `CurrencyPipe` must be imported individually from `@angular/common` (since Angular 17, built-in pipes are standalone and should be imported directly instead of via `CommonModule`). These are the most common "compiles but fails at runtime" mistakes.
+> **Warning:** `RouterLink` must be in the `imports` array. `CurrencyPipe` must be imported individually from `@angular/common` (since Angular 17, built-in pipes are standalone and should be imported directly instead of via `CommonModule`). These are the most common "compiles but fails at runtime" mistakes.
 
 ### Step 4: Create the Product Detail Component
 
@@ -164,11 +178,11 @@ Create the file `product-detail.component.ts` in `libs/products/feature/src/lib/
 
 ```typescript
 // libs/products/feature/src/lib/product-detail.component.ts
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CurrencyPipe } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { switchMap, of } from 'rxjs';
+import { switchMap, of, Subscription } from 'rxjs';
+import { Product } from '@mfe-platform/shared-models';
 import { ProductService } from '@mfe-platform/products-data-access';
 
 @Component({
@@ -186,20 +200,27 @@ import { ProductService } from '@mfe-platform/products-data-access';
     }
   `,
 })
-export class ProductDetailComponent {
+export class ProductDetailComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly productService = inject(ProductService);
 
-  // Read the :id route param and fetch the product
-  readonly product = toSignal(
-    this.route.paramMap.pipe(
+  // signal() + ngOnInit avoids NG0203 in Module Federation remotes.
+  // See the MFE Gotcha note in Step 3 above.
+  readonly product = signal<Product | null>(null);
+  private subscription?: Subscription;
+
+  ngOnInit(): void {
+    this.subscription = this.route.paramMap.pipe(
       switchMap((params) => {
         const id = params.get('id');
         return id ? this.productService.getById(Number(id)) : of(null);
       })
-    ),
-    { initialValue: null }
-  );
+    ).subscribe(p => this.product.set(p));
+  }
+
+  ngOnDestroy(): void {
+    this.subscription?.unsubscribe();
+  }
 }
 ```
 

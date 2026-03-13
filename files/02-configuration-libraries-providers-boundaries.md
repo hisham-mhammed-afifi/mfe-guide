@@ -31,11 +31,34 @@ The `remotes` array is empty by default. Nx discovers which remotes belong to th
 ```typescript
 // apps/shell/webpack.config.ts
 import { withModuleFederation } from '@nx/module-federation/angular';
+import { Configuration } from 'webpack';
 import config from './module-federation.config';
 
-// withModuleFederation reads the Nx project graph and auto-configures sharing
-export default withModuleFederation(config, { dts: false });
+// withModuleFederation reads the Nx project graph and auto-configures sharing.
+// We then override output.publicPath to '/' to prevent a styles.js SyntaxError in the browser.
+export default withModuleFederation(config, { dts: false }).then((mfConfig) => {
+  return (baseConfig: Configuration): Configuration => {
+    const result = mfConfig(baseConfig);
+    return {
+      ...result,
+      output: {
+        ...result.output,
+        publicPath: '/',
+      },
+    };
+  };
+});
 ```
+
+> **Why the shell overrides publicPath:**
+> `withModuleFederation` sets `output.publicPath` to `'auto'` and `experiments.outputModule` to `true`.
+> This makes Webpack emit `import.meta.url` in every chunk, including `styles.js`.
+> Angular injects `styles.js` as a classic script (not `type="module"`), so the browser throws
+> "Cannot use 'import.meta' outside a module". Setting `publicPath` to `'/'` in the shell only
+> avoids this. Remote apps must keep `publicPath` `'auto'` so their chunks resolve to the
+> correct origin when loaded by the shell.
+
+> **Note:** After changing `webpack.config.ts`, a full server restart (`nx serve shell`) is required. Webpack config changes are not picked up by hot reload.
 
 The `withModuleFederation` helper (imported from `@nx/module-federation/angular`) does the heavy lifting:
 
@@ -46,7 +69,7 @@ The `withModuleFederation` helper (imported from `@nx/module-federation/angular`
 
 The `{ dts: false }` option disables automatic TypeScript declaration generation for federated modules. Nx includes this by default.
 
-You never touch this file unless you need advanced customization. Each remote also gets a `webpack.prod.config.ts` for production build overrides. The shell does not have one; it uses the same `webpack.config.ts` for both development and production.
+Beyond the `publicPath` override shown above, you generally do not need to change this file further. Each remote also gets a `webpack.prod.config.ts` for production build overrides. The shell does not have one; it uses the same `webpack.config.ts` for both development and production.
 
 The generated `webpack.prod.config.ts` for each remote uses a spread pattern that allows production overrides:
 

@@ -108,7 +108,7 @@ By the end, you will have a fully working microfrontend system running locally, 
   Exposing individual components, error handling for remote failures, adding new remotes to an existing setup, the Rspack alternative, and `nx graph`.
 
 - **Chapter 15: Best Practices and Pitfalls**
-  10 best practices (including "know what to hand off to DevOps"), 13 pitfalls with fixes, and performance tips.
+  10 best practices (including "know what to hand off to DevOps"), 15 pitfalls with fixes (including NG0203 toSignal() in MFE remotes and the styles.js import.meta error), and performance tips.
 
 - **Appendix A: Quick Reference Card**
   The 10 most common Nx and Module Federation commands.
