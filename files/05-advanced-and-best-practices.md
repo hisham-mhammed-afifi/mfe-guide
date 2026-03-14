@@ -54,15 +54,15 @@ export { ProductCardComponent } from './lib/product-card.component';
 Now update the remote's federation config to expose this component as an additional entry:
 
 ```typescript
-// apps/mfe_products/module-federation.config.ts
+// apps/mfeProducts/module-federation.config.ts
 import { ModuleFederationConfig } from '@nx/module-federation';
 
 const config: ModuleFederationConfig = {
-  name: 'mfe_products',
+  name: 'mfeProducts',
   exposes: {
     // Expose the full route tree (existing)
     './Routes':
-      'apps/mfe_products/src/app/remote-entry/entry.routes.ts',
+      'apps/mfeProducts/src/app/remote-entry/entry.routes.ts',
     // Expose a single component (new)
     './ProductCard':
       'libs/products/feature/src/lib/product-card.component.ts',
@@ -84,8 +84,8 @@ import { loadRemote } from '@module-federation/enhanced/runtime';
 {
   path: 'featured',
   loadComponent: () =>
-    loadRemote<typeof import('mfe_products/ProductCard')>(
-      'mfe_products/ProductCard'
+    loadRemote<typeof import('mfeProducts/ProductCard')>(
+      'mfeProducts/ProductCard'
     ).then((m) => m!.ProductCardComponent),
 }
 ```
@@ -144,9 +144,9 @@ function loadRemoteRoutes(remoteName: string): () => Promise<Route[]> {
 }
 
 export const appRoutes: Route[] = [
-  { path: 'products', loadChildren: loadRemoteRoutes('mfe_products') },
-  { path: 'orders', loadChildren: loadRemoteRoutes('mfe_orders') },
-  { path: 'account', loadChildren: loadRemoteRoutes('mfe_account') },
+  { path: 'products', loadChildren: loadRemoteRoutes('mfeProducts') },
+  { path: 'orders', loadChildren: loadRemoteRoutes('mfeOrders') },
+  { path: 'account', loadChildren: loadRemoteRoutes('mfeAccount') },
 ];
 ```
 
@@ -157,7 +157,7 @@ export const appRoutes: Route[] = [
 Use the `@nx/angular:remote` generator with the `--host` flag to wire it automatically:
 
 ```bash
-npx nx g @nx/angular:remote apps/mfe_notifications \
+npx nx g @nx/angular:remote apps/mfeNotifications \
   --host=shell \
   --prefix=app \
   --style=scss \
@@ -169,16 +169,16 @@ Then complete these steps:
 1. **Add the URL to the manifest.** Edit `apps/shell/public/module-federation.manifest.json`:
    ```json
    {
-     "mfe_products": "http://localhost:4201/mf-manifest.json",
-     "mfe_orders": "http://localhost:4202/mf-manifest.json",
-     "mfe_account": "http://localhost:4203/mf-manifest.json",
-     "mfe_notifications": "http://localhost:4204/mf-manifest.json"
+     "mfeProducts": "http://localhost:4201/mf-manifest.json",
+     "mfeOrders": "http://localhost:4202/mf-manifest.json",
+     "mfeAccount": "http://localhost:4203/mf-manifest.json",
+     "mfeNotifications": "http://localhost:4204/mf-manifest.json"
    }
    ```
 
 2. **Verify the route was added.** The generator automatically adds a lazy route to the shell's `app.routes.ts`. Check that it is there.
 
-3. **Tag the new project.** Add `"tags": ["scope:notifications", "type:app"]` to `apps/mfe_notifications/project.json`.
+3. **Tag the new project.** Add `"tags": ["scope:notifications", "type:app"]` to `apps/mfeNotifications/project.json`.
 
 4. **Update boundary constraints.** Add a scope rule for `scope:notifications` in `eslint.config.mjs`.
 
@@ -200,7 +200,7 @@ Nx 22 supports converting Angular projects from Webpack to **Rspack**, a Rust-ba
 
 ```bash
 npx nx g @nx/angular:convert-to-rspack shell
-npx nx g @nx/angular:convert-to-rspack mfe_products
+npx nx g @nx/angular:convert-to-rspack mfeProducts
 ```
 
 Rspack uses the same Module Federation API, so the config files stay almost identical. The trade-off is a smaller plugin ecosystem. If your setup uses standard Module Federation without exotic Webpack plugins, Rspack is worth evaluating.
@@ -321,7 +321,7 @@ This also applies to `toObservable()` and any other helper from `@angular/core/r
 - **Prefetch critical remotes:** Call `loadRemote()` in the background after shell load for routes the user is likely to visit next.
 - **Use `@defer` blocks:** Angular's deferrable views can be combined with remote loading for viewport-triggered loading.
 - **Code-split within remotes:** Remotes can have their own lazy-loaded child routes, further reducing initial bundle size.
-- **Monitor bundles:** Use `npx nx build mfe_products --statsJson` and analyze with `webpack-bundle-analyzer`.
+- **Monitor bundles:** Use `npx nx build mfeProducts --statsJson` and analyze with `webpack-bundle-analyzer`.
 - **Prefer static remotes during dev:** Only use `--devRemotes` for the remote you are actively editing. Static remotes are served from cache instantly.
 - **Check for duplicates:** Open the Network tab, filter for `@angular/core`. If more than one chunk appears, sharing is broken.
 
@@ -334,13 +334,13 @@ The most common Nx and Module Federation commands (all explained in the chapters
 | Command | What It Does |
 |---|---|
 | `npx nx serve shell` | Serve the shell with all remotes (static) |
-| `npx nx serve shell --devRemotes=mfe_products` | Serve shell with products in HMR mode |
-| `npx nx serve mfe_products` | Serve a remote standalone on its own port |
+| `npx nx serve shell --devRemotes=mfeProducts` | Serve shell with products in HMR mode |
+| `npx nx serve mfeProducts` | Serve a remote standalone on its own port |
 | `npx nx build shell --configuration=production` | Production build of the shell |
-| `npx nx build mfe_products --configuration=production` | Production build of a remote |
-| `npx nx test mfe_products` | Run Vitest unit tests for a project |
-| `npx nx affected -t lint test build` | Lint, test, and build only affected projects |
-| `npx nx g @nx/angular:remote apps/mfe_new --host=shell` | Add a new remote wired to the shell |
+| `npx nx build mfeProducts --configuration=production` | Production build of a remote |
+| `npx nx run products-data-access:vitest:test` | Run Vitest unit tests for an Angular library (Nx 22.4.5 target name) |
+| `npx nx affected -t lint test vitest:test build` | Lint, test, and build only affected projects |
+| `npx nx g @nx/angular:remote apps/mfeNew --host=shell` | Add a new remote wired to the shell |
 | `npx nx g @nx/angular:library --directory=libs/shared/my-lib --name=my-lib --importPath=@mfe-platform/my-lib` | Generate a shared library |
 | `npx nx graph` | Visualize the project dependency graph |
 | `npx nx migrate latest` | Update Nx, Angular, and all plugins |
@@ -358,9 +358,9 @@ Copy this into a Slack message or Jira ticket for your DevOps team.
 **Build commands (one per app):**
 ```
 npx nx build shell --configuration=production
-npx nx build mfe_products --configuration=production
-npx nx build mfe_orders --configuration=production
-npx nx build mfe_account --configuration=production
+npx nx build mfeProducts --configuration=production
+npx nx build mfeOrders --configuration=production
+npx nx build mfeAccount --configuration=production
 ```
 
 **Output directory per app:**
@@ -370,9 +370,9 @@ npx nx build mfe_account --configuration=production
 Located at `dist/apps/shell/module-federation.manifest.json`. Must be replaced with environment-specific URLs after building, before deploying. Format:
 ```json
 {
-  "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
-  "mfe_orders": "https://orders.mfe.example.com/mf-manifest.json",
-  "mfe_account": "https://account.mfe.example.com/mf-manifest.json"
+  "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+  "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+  "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
 }
 ```
 
@@ -391,9 +391,9 @@ nginx or CloudFront must return `index.html` for all routes that do not match a 
 **Docker build (if using containers):**
 ```
 docker build --build-arg APP_NAME=shell -t mfe-shell:latest .
-docker build --build-arg APP_NAME=mfe_products -t mfe-products:latest .
-docker build --build-arg APP_NAME=mfe_orders -t mfe-orders:latest .
-docker build --build-arg APP_NAME=mfe_account -t mfe-account:latest .
+docker build --build-arg APP_NAME=mfeProducts -t mfe-products:latest .
+docker build --build-arg APP_NAME=mfeOrders -t mfe-orders:latest .
+docker build --build-arg APP_NAME=mfeAccount -t mfe-account:latest .
 ```
 
 **Environment variables (for ECS/EKS container deploy):**

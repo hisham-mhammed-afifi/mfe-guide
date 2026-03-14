@@ -4,7 +4,7 @@
 
 ## Chapter 7: Building Features in Remotes
 
-Let's build out `mfe_products` with complete, compilable code. Every import is shown explicitly. No ellipsis, no "exercise for the reader."
+Let's build out `mfeProducts` with complete, compilable code. Every import is shown explicitly. No ellipsis, no "exercise for the reader."
 
 ### What Happens When a User Clicks "Products"
 
@@ -13,8 +13,8 @@ Here is the sequence of events when the user navigates to `/products` in the she
 ```
 1. User clicks "Products" link in the shell
 2. Angular router matches path "products" -> loadChildren
-3. loadRemote('mfe_products/Routes') is called
-4. Federation runtime looks up 'mfe_products' URL from registered remotes
+3. loadRemote('mfeProducts/Routes') is called
+4. Federation runtime looks up 'mfeProducts' URL from registered remotes
 5. Browser fetches http://products.cdn.com/mf-manifest.json
 6. mf-manifest.json tells the runtime what the remote exposes and needs
 7. Federation checks shared deps (@angular/core, rxjs, etc.) - already loaded
@@ -239,7 +239,7 @@ export { ProductDetailComponent } from './lib/product-detail.component';
 Replace the placeholder `RemoteEntry` component with real routes that use the feature library. The `RemoteEntry` component in `entry.ts` is no longer referenced. You can safely delete that file.
 
 ```typescript
-// apps/mfe_products/src/app/remote-entry/entry.routes.ts
+// apps/mfeProducts/src/app/remote-entry/entry.routes.ts
 import { Route } from '@angular/router';
 
 export const remoteRoutes: Route[] = [
@@ -264,7 +264,7 @@ export const remoteRoutes: Route[] = [
 ### Step 7: Run Standalone
 
 ```bash
-npx nx serve mfe_products
+npx nx serve mfeProducts
 ```
 
 Navigate to `http://localhost:4201`. You should see a grid of products loaded from the DummyJSON API, each showing a thumbnail, title, and price. Click any product to see its detail page. The products feature runs independently using its own `bootstrap.ts` and `app.config.ts` (with providers). This is useful for focused development without starting the full system.
@@ -285,9 +285,9 @@ Navigate to `http://localhost:4200/products`. The shell loads the products remot
 > - [x] Updated `entry.routes.ts` to lazy-load from the feature library
 > - [x] Verified standalone mode on port 4201 and integrated mode via the shell on port 4200
 
-> **Tip:** This guide uses [DummyJSON](https://dummyjson.com) as a free public API so you can see real data immediately. DummyJSON also provides endpoints for users, carts, and authentication that you can use when building out the `mfe_orders` and `mfe_account` remotes. See `https://dummyjson.com/docs` for the full API reference.
+> **Tip:** This guide uses [DummyJSON](https://dummyjson.com) as a free public API so you can see real data immediately. DummyJSON also provides endpoints for users, carts, and authentication that you can use when building out the `mfeOrders` and `mfeAccount` remotes. See `https://dummyjson.com/docs` for the full API reference.
 
-> **Note:** The `mfe_orders` and `mfe_account` remotes still use their generated placeholder components. Building them out follows the same pattern you just completed: define models in `shared-models`, create services in the `data-access` library, build components in the `feature` library, and update `entry.routes.ts`. This is left as an exercise since the pattern is identical.
+> **Note:** The `mfeOrders` and `mfeAccount` remotes still use their generated placeholder components. Building them out follows the same pattern you just completed: define models in `shared-models`, create services in the `data-access` library, build components in the `feature` library, and update `entry.routes.ts`. This is left as an exercise since the pattern is identical.
 
 With features built, let's look at how to work efficiently during development. That's Chapter 8.
 
@@ -310,6 +310,8 @@ When you run `nx serve shell`, Nx needs to serve all the remotes alongside the s
 npx nx serve shell
 ```
 
+> **Warning:** The first time you run `npx nx serve shell`, Nx builds every remote from scratch before the shell starts. On a typical laptop this takes 3–8 minutes. If the terminal appears to hang, it is still building — watch for the webpack compilation output from each remote. Do not interrupt the process. Subsequent runs are fast because Nx restores unchanged remotes from cache.
+
 Nx discovers which remotes belong to the shell by reading the project graph, which was configured automatically when you ran the host generator with `--remotes`. The `remotes` array in `module-federation.config.ts` is empty for dynamic federation setups. Nx builds each remote (or restores from cache) and serves them all statically alongside the shell. Unchanged remotes are restored from Nx's local cache instantly. With Nx Cloud remote caching enabled, even a fresh machine gets cached artifacts, making the full system start in seconds instead of minutes.
 
 > **Note:** **Nx's local cache** stores build results on your machine. If a project has not changed since the last build, `nx serve` or `nx build` restores the output from cache instead of rebuilding. **Nx Cloud remote caching** (optional, enabled by connecting to Nx Cloud) uploads these cached results to a shared server. When a teammate or CI machine needs the same build, it downloads the cached result instead of rebuilding from scratch. This is how "even a fresh machine gets cached artifacts." A cache miss occurs when the project's source files, dependencies, or configuration have changed since the last cached build. Changing a file in `shared/ui` invalidates the cache for ALL projects that depend on it.
@@ -317,15 +319,15 @@ Nx discovers which remotes belong to the shell by reading the project graph, whi
 ### Developing a Specific Remote
 
 ```bash
-npx nx serve shell --devRemotes=mfe_products
+npx nx serve shell --devRemotes=mfeProducts
 ```
 
-Changes to `mfe_products` source files trigger HMR instantly. `mfe_orders` and `mfe_account` are served as static builds.
+Changes to `mfeProducts` source files trigger HMR instantly. `mfeOrders` and `mfeAccount` are served as static builds.
 
 ### Working on Multiple Remotes
 
 ```bash
-npx nx serve shell --devRemotes=mfe_products,mfe_orders
+npx nx serve shell --devRemotes=mfeProducts,mfeOrders
 ```
 
 > **Warning:** Each dev remote runs its own `webpack-dev-server`, consuming 1-2 GB of RAM. Running 4+ dev remotes simultaneously can consume 8+ GB. Only use `--devRemotes` for the remotes you are actively editing.
@@ -355,14 +357,20 @@ Now that the development workflow is clear, let's look at how microfrontends com
 Since Angular runs as a singleton, `@Injectable({ providedIn: 'root' })` services in shared libraries are instantiated once and shared across all microfrontends:
 
 ```typescript
-import { AuthService } from '@mfe-platform/shared-data-access-auth';
+// libs/shared/data-access-auth/src/lib/auth.service.ts  ← definition
+import { Injectable } from '@angular/core';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService { /* ... */ }
+```
+
+```typescript
+// In any MFE component or service  ← consumption
+import { AuthService } from '@mfe-platform/shared-data-access-auth';
 
 // Shell:        inject(AuthService)  -> Instance A
-// mfe_products: inject(AuthService)  -> Same Instance A
-// mfe_orders:   inject(AuthService)  -> Same Instance A
+// mfeProducts: inject(AuthService)  -> Same Instance A
+// mfeOrders:   inject(AuthService)  -> Same Instance A
 ```
 
 This is the safest and most debuggable approach for cross-MFE state. As we saw in Chapter 4, the `AuthService` uses signals internally, and every MFE reads the same signal values because they share the same service instance.
@@ -390,12 +398,12 @@ export const isAuthenticated = computed(() => currentUser() !== null);
 For loose notifications between microfrontends that do not need request-response patterns. Always store the handler reference so you can remove it in `ngOnDestroy` — failing to do so causes a memory leak:
 
 ```typescript
-// In mfe_products — dispatch when user adds item to cart
+// In mfeProducts — dispatch when user adds item to cart
 window.dispatchEvent(new CustomEvent('cart:add', {
   detail: { productId: '123', qty: 1 },
 }));
 
-// In mfe_orders — listen and clean up properly
+// In mfeOrders — listen and clean up properly
 import { Component, OnInit, OnDestroy } from '@angular/core';
 
 @Component({ /* ... */ })

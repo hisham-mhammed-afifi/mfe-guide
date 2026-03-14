@@ -14,7 +14,7 @@ The user sees one website. Under the hood, that website is composed of multiple 
 
 ### What Is a Monorepo?
 
-A **monorepo** (short for "monolithic repository") is a single Git repository that contains multiple projects. Instead of having separate repositories for `shell`, `mfe_products`, `mfe_orders`, and `mfe_account`, all four live side by side in one repository.
+A **monorepo** (short for "monolithic repository") is a single Git repository that contains multiple projects. Instead of having separate repositories for `shell`, `mfeProducts`, `mfeOrders`, and `mfeAccount`, all four live side by side in one repository.
 
 Why? Because microfrontends that share libraries, models, and services need to stay in sync. A monorepo makes it easy to share code, run a single `npm install`, and ensure everyone uses the same Angular version. The alternative (separate repositories per MFE) creates significant coordination overhead for small-to-medium teams.
 
@@ -145,14 +145,14 @@ This is the key step. Nx's `@nx/angular:host` generator creates the shell applic
 
 ```bash
 npx nx g @nx/angular:host apps/shell \
-  --remotes=mfe_products,mfe_orders,mfe_account \
+  --remotes=mfeProducts,mfeOrders,mfeAccount \
   --dynamic \
   --prefix=app \
   --style=scss \
   --no-interactive
 ```
 
-> **Note:** Nx does not allow hyphens in remote names. Remote names can only contain letters, digits, underscores, and dollar signs. This guide uses snake_case (`mfe_products`) throughout.
+> **Note:** Nx does not allow hyphens in remote names. Remote names can only contain letters, digits, underscores, and dollar signs. This guide uses camelCase (`mfeProducts`) so that Angular's component generator can produce valid kebab-case selectors (e.g., `app-mfe-products-entry`).
 
 Here is what each flag does:
 
@@ -176,7 +176,7 @@ Here is what each flag does:
 > 1. Creates a separate Angular application with its own `module-federation.config.ts`, `webpack.config.ts`, `main.ts`, and `bootstrap.ts`.
 > 2. Configures an `exposes` block pointing to `entry.routes.ts` (the federated entry point).
 > 3. Generates a placeholder `RemoteEntry` component and `entry.routes.ts`.
-> 4. Assigns unique ports: shell on 4200, mfe_products on 4201, mfe_orders on 4202, mfe_account on 4203.
+> 4. Assigns unique ports: shell on 4200, mfeProducts on 4201, mfeOrders on 4202, mfeAccount on 4203.
 > 5. Adds a lazy route to the shell's `app.routes.ts` for each remote.
 
 > **Note:** In Angular 21, `standalone: true` is the default for components and directives. You will not see `standalone: true` in any generated code or in this guide. If you see it in older tutorials, it is no longer necessary.
@@ -190,12 +190,12 @@ mfe-platform/
   apps/
     shell/                      # Host application (port 4200)
     shell-e2e/                  # End-to-end tests for the shell
-    mfe_products/                # Remote: product catalog (port 4201)
-    mfe_products-e2e/            # E2E tests for products remote
-    mfe_orders/                  # Remote: order management (port 4202)
-    mfe_orders-e2e/              # E2E tests for orders remote
-    mfe_account/                 # Remote: user account (port 4203)
-    mfe_account-e2e/             # E2E tests for account remote
+    mfeProducts/                # Remote: product catalog (port 4201)
+    mfeProducts-e2e/            # E2E tests for products remote
+    mfeOrders/                  # Remote: order management (port 4202)
+    mfeOrders-e2e/              # E2E tests for orders remote
+    mfeAccount/                 # Remote: user account (port 4203)
+    mfeAccount-e2e/             # E2E tests for account remote
   nx.json                       # Nx workspace configuration
   tsconfig.base.json            # Shared TypeScript config
   vitest.workspace.mts          # Vitest workspace configuration (auto-generated)
@@ -220,7 +220,7 @@ Confirm you see `@nx/angular`, `@nx/module-federation`, and Angular 21.x in the 
 npx nx serve shell
 ```
 
-Navigate to `http://localhost:4200`. You should see the Nx welcome page with links for each remote. Clicking a link (e.g., the mfe_products link) loads that remote's placeholder component via Module Federation. We will replace this welcome page with a proper layout later. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
+Navigate to `http://localhost:4200`. You should see the Nx welcome page with links for each remote. Clicking a link (e.g., the mfeProducts link) loads that remote's placeholder component via Module Federation. We will replace this welcome page with a proper layout later. Nx automatically builds all remotes (or restores them from cache) and serves them alongside the shell.
 
 > **Note:** The first time you run `npx nx serve shell`, Nx must build all three remotes from scratch before the shell can start. This can take several minutes depending on your machine. Subsequent runs are much faster because Nx caches the build output and skips unchanged projects.
 

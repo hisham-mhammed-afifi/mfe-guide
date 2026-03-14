@@ -1,0 +1,34 @@
+# docker-compose.yml
+services:
+  shell:
+    build:
+      context: .
+      args:
+        APP_NAME: shell
+    ports:
+      - "4200:80"
+
+  # Docker service names use hyphens; APP_NAME must match the Nx project name (snake_case)
+  mfe-products:
+    build:
+      context: .
+      args:
+        APP_NAME: mfe_products
+    ports:
+      - "4201:80"
+
+  mfe-orders:
+    build:
+      context: .
+      args:
+        APP_NAME: mfe_orders
+    ports:
+      - "4202:80"
+
+  mfe-account:
+    build:
+      context: .
+      args:
+        APP_NAME: mfe_account
+    ports:
+      - "4203:80"

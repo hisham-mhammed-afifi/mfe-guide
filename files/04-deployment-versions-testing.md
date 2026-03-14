@@ -36,15 +36,15 @@ Every MFE (including the shell) produces a static build folder when you run:
 
 ```bash
 npx nx build shell --configuration=production
-npx nx build mfe_products --configuration=production
-npx nx build mfe_orders --configuration=production
-npx nx build mfe_account --configuration=production
+npx nx build mfeProducts --configuration=production
+npx nx build mfeOrders --configuration=production
+npx nx build mfeAccount --configuration=production
 ```
 
 The output for each app lands in `dist/apps/<name>/` and contains:
 
 ```
-dist/apps/mfe_products/
+dist/apps/mfeProducts/
   index.html              # The SPA entry point
   main.[hash].js          # Application code (content-hashed filename)
   remoteEntry.mjs         # Module Federation entry (NOT hashed)
@@ -57,7 +57,7 @@ dist/apps/mfe_products/
 
 > **Warning:** `remoteEntry.mjs` is the file that Module Federation uses to discover what a remote exposes. Unlike other JS files, it is **not content-hashed**. Its filename stays the same across builds, but its contents change. This has critical implications for caching (covered below).
 
-> **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfe_products --configuration=production` and checking the output.
+> **Note:** The exact output path may vary depending on your build executor. Verify by running `npx nx build mfeProducts --configuration=production` and checking the output.
 
 > **Note:** During builds, you may see a warning: `Could not find a version for "@angular/animations" in the root "package.json" when collecting shared packages for the Module Federation setup.` This is a cosmetic warning from Module Federation's dependency scanning. As long as `@angular/animations` is installed (see Chapter 2 Step 2), the build output works correctly.
 
@@ -67,9 +67,9 @@ As we saw in Chapter 3, the manifest (`module-federation.manifest.json`) maps re
 
 ```json
 {
-  "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
-  "mfe_orders": "https://orders.mfe.example.com/mf-manifest.json",
-  "mfe_account": "https://account.mfe.example.com/mf-manifest.json"
+  "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+  "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+  "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
 }
 ```
 
@@ -120,7 +120,7 @@ RUN npm ci --ignore-scripts
 FROM deps AS builder
 WORKDIR /app
 COPY . .
-# APP_NAME is passed at build time (e.g., shell, mfe_products)
+# APP_NAME is passed at build time (e.g., shell, mfeProducts)
 ARG APP_NAME
 ARG CONFIGURATION=production
 RUN npx nx build ${APP_NAME} --configuration=${CONFIGURATION}
@@ -205,12 +205,12 @@ services:
     ports:
       - "4200:80"
 
-  # Docker service names use hyphens; APP_NAME must match the Nx project name (snake_case)
+  # Docker service names use hyphens; APP_NAME must match the Nx project name (camelCase)
   mfe-products:
     build:
       context: .
       args:
-        APP_NAME: mfe_products
+        APP_NAME: mfeProducts
     ports:
       - "4201:80"
 
@@ -218,7 +218,7 @@ services:
     build:
       context: .
       args:
-        APP_NAME: mfe_orders
+        APP_NAME: mfeOrders
     ports:
       - "4202:80"
 
@@ -226,7 +226,7 @@ services:
     build:
       context: .
       args:
-        APP_NAME: mfe_account
+        APP_NAME: mfeAccount
     ports:
       - "4203:80"
 ```
@@ -234,6 +234,8 @@ services:
 ```bash
 docker compose up --build -d
 ```
+
+> **Note:** Make sure Docker Desktop is running before executing this command. If you see `Cannot connect to the Docker daemon at unix:///var/run/docker.sock`, open Docker Desktop, wait for it to fully start, then retry.
 
 The `--build` flag forces Docker to rebuild the images (instead of using a previous build). The `-d` flag means "detached," which runs the containers in the background so you get your terminal back. Without `-d`, the terminal would show live container logs and you would need a second terminal to run tests.
 
@@ -278,9 +280,9 @@ npx nx build shell --configuration=production
 # Overwrite manifest with environment-specific URLs
 cat > dist/apps/shell/module-federation.manifest.json << EOF
 {
-  "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
-  "mfe_orders": "https://orders.mfe.example.com/mf-manifest.json",
-  "mfe_account": "https://account.mfe.example.com/mf-manifest.json"
+  "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+  "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+  "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
 }
 EOF
 
@@ -299,9 +301,9 @@ aws cloudfront create-invalidation \
 # Generate manifest from environment variables injected by ECS/EKS
 cat > /usr/share/nginx/html/module-federation.manifest.json << EOF
 {
-  "mfe_products": "${MFE_PRODUCTS_URL}/mf-manifest.json",
-  "mfe_orders": "${MFE_ORDERS_URL}/mf-manifest.json",
-  "mfe_account": "${MFE_ACCOUNT_URL}/mf-manifest.json"
+  "mfeProducts": "${MFE_PRODUCTS_URL}/mf-manifest.json",
+  "mfeOrders": "${MFE_ORDERS_URL}/mf-manifest.json",
+  "mfeAccount": "${MFE_ACCOUNT_URL}/mf-manifest.json"
 }
 EOF
 
@@ -354,7 +356,7 @@ jobs:
       - run: npm ci
       # Sets base/head SHAs for affected detection
       - uses: nrwl/nx-set-shas@v4
-      - run: npx nx affected -t lint test build
+      - run: npx nx affected -t lint test vitest:test build
 
   deploy:
     needs: ci
@@ -362,7 +364,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [shell, mfe_products, mfe_orders, mfe_account]
+        app: [shell, mfeProducts, mfeOrders, mfeAccount]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -397,9 +399,9 @@ jobs:
         run: |
           cat > dist/apps/shell/module-federation.manifest.json << 'EOF'
           {
-            "mfe_products": "https://products.mfe.example.com/mf-manifest.json",
-            "mfe_orders": "https://orders.mfe.example.com/mf-manifest.json",
-            "mfe_account": "https://account.mfe.example.com/mf-manifest.json"
+            "mfeProducts": "https://products.mfe.example.com/mf-manifest.json",
+            "mfeOrders": "https://orders.mfe.example.com/mf-manifest.json",
+            "mfeAccount": "https://account.mfe.example.com/mf-manifest.json"
           }
           EOF
 
@@ -424,7 +426,7 @@ jobs:
 - **Matrix strategy:** Each MFE is a parallel job. Only affected apps build and deploy.
 - **Manifest injection:** The shell gets its production manifest after the build, before S3 sync.
 - **`nrwl/nx-set-shas@v4`:** This GitHub Action sets the base and head Git SHAs that Nx uses to determine which projects were affected.
-- **CloudFront distribution IDs** should be stored as secrets: `CF_DIST_shell`, `CF_DIST_mfe_products`, `CF_DIST_mfe_orders`, `CF_DIST_mfe_account`.
+- **CloudFront distribution IDs** should be stored as secrets: `CF_DIST_shell`, `CF_DIST_mfeProducts`, `CF_DIST_mfeOrders`, `CF_DIST_mfeAccount`.
 
 ### AWS Architecture Overview
 
@@ -475,7 +477,7 @@ Share this table with your DevOps team so they configure caching correctly:
 
 Copy this into a Slack message or Jira ticket:
 
-- **Build commands:** `npx nx build <app-name> --configuration=production` for each of: `shell`, `mfe_products`, `mfe_orders`, `mfe_account`
+- **Build commands:** `npx nx build <app-name> --configuration=production` for each of: `shell`, `mfeProducts`, `mfeOrders`, `mfeAccount`
 - **Output directory:** `dist/apps/<app-name>/` (contains `index.html`, JS chunks, CSS, assets)
 - **Manifest file:** `dist/apps/shell/module-federation.manifest.json` must be replaced with environment-specific URLs after building, before deploying
 - **Manifest format:** JSON object where keys are remote names and values are full URLs to `mf-manifest.json`
@@ -530,7 +532,7 @@ Now let's look at how to test the composed system effectively. That's Chapter 13
 
 ## Chapter 13: Testing Strategy
 
-> **Note:** Angular 21 made Vitest the default test runner, replacing Karma/Jasmine. Nx 22.3+ supports Vitest for Angular projects via the `@analogjs/vite-plugin-angular` Vite plugin, which enables Angular's TestBed to work within a Vitest environment. All test files use the standard `.spec.ts` extension. The `nx test` command runs Vitest in single-run mode by default (the generated `vite.config.mts` sets `watch: false`). Add the `--watch` flag for continuous testing during local development: `npx nx test mfe_products --watch`. Angular's `TestBed`, `HttpTestingController`, and other testing utilities work the same way with Vitest as they did with previous test runners.
+> **Note:** Angular 21 made Vitest the default test runner, replacing Karma/Jasmine. Nx 22.3+ supports Vitest for Angular projects via the `@analogjs/vite-plugin-angular` Vite plugin, which enables Angular's TestBed to work within a Vitest environment. All test files use the standard `.spec.ts` extension. The `nx test` command runs Vitest in single-run mode by default (the generated `vite.config.mts` sets `watch: false`). Add the `--watch` flag for continuous testing during local development: `npx nx run products-data-access:vitest:test --watch`. Angular's `TestBed`, `HttpTestingController`, and other testing utilities work the same way with Vitest as they did with previous test runners.
 
 `vitest.workspace.mts` at the workspace root aggregates all per-project `vite.config.mts` files into one workspace-level Vitest configuration. Nx manages this file automatically — you should not need to edit it unless you are adding custom Vitest workspace-level configuration (such as global setup files).
 
@@ -538,17 +540,17 @@ Now let's look at how to test the composed system effectively. That's Chapter 13
 
 Each library and app has its own unit tests. Run them individually or for the whole workspace:
 
-> **Note on test runners:** `npx nx affected -t test` runs each project with its configured test runner. Projects generated with `@nx/angular:library` use Vitest; projects generated with `@nx/js:library` use Jest by default (unless you added `--unitTestRunner=vitest` during generation). Both runners work side by side. Jest output format differs from Vitest's tree output shown in this chapter. To run tests for a Jest-configured library: `npx nx test shared-models`.
+> **Note on Nx 22.4.5 test target naming:** `@nx/angular:library` generates a test target named `vitest:test` (not `test`). Running `npx nx test products-data-access` will fail with "task not found." Use `npx nx run products-data-access:vitest:test` instead. `@nx/js:library` (used for `shared-models` and `shared-utils`) keeps the `test` target by default, so `npx nx test shared-models` still works. To run all tests for both target names in one command: `npx nx affected -t test vitest:test`.
 
 ```bash
-# Test a specific library
-npx nx test products-data-access
+# Test a specific Angular library (vitest:test target in Nx 22.4.5)
+npx nx run products-data-access:vitest:test
 
-# Test only projects affected by your changes
-npx nx affected -t test
+# Test only projects affected by your changes (handles both vitest:test and test targets)
+npx nx affected -t vitest:test test
 ```
 
-> **Note:** Remote apps (`mfe_products`, `mfe_orders`, `mfe_account`) have no generated test files. Running `npx nx test mfe_products` will fail with "No test files found." Your unit tests live in the shared libraries (like `products-data-access`), not in the remote apps themselves. Run `npx nx test products-data-access` to test the product service, for example.
+> **Note:** Remote apps (`mfeProducts`, `mfeOrders`, `mfeAccount`) have no generated test files. Running `npx nx test mfeProducts` will fail with "No test files found." Your unit tests live in the shared libraries (like `products-data-access`), not in the remote apps themselves. Run `npx nx run products-data-access:vitest:test` to test the product service, for example.
 
 Vitest output uses a tree format with checkmarks:
 
@@ -652,25 +654,37 @@ docker compose down
 3. No Module Federation warnings in the browser console.
 4. `@angular/core` appears only once in the Network tab (no duplicate loading).
 
+### Inspecting a Project's Targets
+
+Before running tests or builds, you can inspect what targets a project has configured:
+
+```bash
+npx nx show project products-data-access
+```
+
+This prints the full target list, executors, and options from `project.json`. Use it to confirm whether a project has a `test` target, a `vitest:test` target, or both.
+
 ### Contract Testing
 
 Contract tests verify that each remote exposes the module shape the shell expects. If someone renames `remoteRoutes` to `routes` in a remote's `entry.routes.ts`, these tests catch it before deployment.
 
 First, add path aliases so the test can import remote entry files directly:
 
+> **Note:** `tsconfig.base.json` already has a `"paths"` object populated with your shared library aliases (e.g., `@mfe-platform/shared-ui`, `@mfe-platform/products-feature`, etc.) from Chapter 4. Add the entries below as additional keys inside the existing `"paths"` object — do not replace the whole `"paths"` section.
+
 ```json
-// tsconfig.base.json (add to "paths")
+// tsconfig.base.json (add these entries inside the existing "paths" object)
 {
   "compilerOptions": {
     "paths": {
-      "@mfe-platform/mfe_products/entry": [
-        "apps/mfe_products/src/app/remote-entry/entry.routes.ts"
+      "@mfe-platform/mfeProducts/entry": [
+        "apps/mfeProducts/src/app/remote-entry/entry.routes.ts"
       ],
-      "@mfe-platform/mfe_orders/entry": [
-        "apps/mfe_orders/src/app/remote-entry/entry.routes.ts"
+      "@mfe-platform/mfeOrders/entry": [
+        "apps/mfeOrders/src/app/remote-entry/entry.routes.ts"
       ],
-      "@mfe-platform/mfe_account/entry": [
-        "apps/mfe_account/src/app/remote-entry/entry.routes.ts"
+      "@mfe-platform/mfeAccount/entry": [
+        "apps/mfeAccount/src/app/remote-entry/entry.routes.ts"
       ]
     }
   }
@@ -684,8 +698,8 @@ Then write the contract tests:
 import { Route } from '@angular/router';
 
 describe('MFE Contract Tests', () => {
-  it('mfe_products exposes remoteRoutes as a non-empty array', async () => {
-    const mod = await import('@mfe-platform/mfe_products/entry');
+  it('mfeProducts exposes remoteRoutes as a non-empty array', async () => {
+    const mod = await import('@mfe-platform/mfeProducts/entry');
     // Verify the export exists and is an array with at least one route
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
@@ -694,21 +708,21 @@ describe('MFE Contract Tests', () => {
     expect(mod.remoteRoutes.find((r: Route) => r.path === '')).toBeDefined();
   });
 
-  it('mfe_orders exposes remoteRoutes as a non-empty array', async () => {
-    const mod = await import('@mfe-platform/mfe_orders/entry');
+  it('mfeOrders exposes remoteRoutes as a non-empty array', async () => {
+    const mod = await import('@mfe-platform/mfeOrders/entry');
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
   });
 
-  it('mfe_account exposes remoteRoutes as a non-empty array', async () => {
-    const mod = await import('@mfe-platform/mfe_account/entry');
+  it('mfeAccount exposes remoteRoutes as a non-empty array', async () => {
+    const mod = await import('@mfe-platform/mfeAccount/entry');
     expect(mod.remoteRoutes).toBeDefined();
     expect(Array.isArray(mod.remoteRoutes)).toBe(true);
   });
 });
 ```
 
-> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx test shell`). Vitest resolves the `@mfe-platform/mfe_products/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). To verify that the `exposes` paths resolve to actual files, run a production build (`npx nx build mfe_products --configuration=production`). The build will fail if an exposed path points to a non-existent file. The Docker Compose integration tests also catch this class of error.
+> **Note:** These tests import the remote's entry file directly using a tsconfig path alias (bypassing Module Federation). They run as part of the shell's Vitest test suite (`npx nx run shell:vitest:test`). Vitest resolves the `@mfe-platform/mfeProducts/entry` import by following the path alias in `tsconfig.base.json`, just like a regular TypeScript import. The `await import(...)` is a standard dynamic import that Vitest handles natively. These tests verify the export name and shape (that `remoteRoutes` exists and is a non-empty array), catching breaking changes like renamed exports before they cause runtime errors in the shell. They do NOT verify the Module Federation wiring (the `exposes` block in `module-federation.config.ts`). To verify that the `exposes` paths resolve to actual files, run a production build (`npx nx build mfeProducts --configuration=production`). The build will fail if an exposed path points to a non-existent file. The Docker Compose integration tests also catch this class of error.
 
 Now that the application is tested and deployment artifacts are ready for your DevOps team, let's look at advanced patterns and best practices. That's Chapter 14.
 

@@ -45,9 +45,9 @@ Chapter 1 is concepts only, with no code. Chapter 2 introduces your first comman
 The running example throughout the entire guide is an **e-commerce platform** with four applications:
 
 - **`shell`** (host): layout, navigation, authentication
-- **`mfe_products`** (remote): product listing, product detail
-- **`mfe_orders`** (remote): order history, order tracking
-- **`mfe_account`** (remote): user profile, settings
+- **`mfeProducts`** (remote): product listing, product detail
+- **`mfeOrders`** (remote): order history, order tracking
+- **`mfeAccount`** (remote): user profile, settings
 
 By the end, you will have a fully working microfrontend system running locally, with reference artifacts ready to hand off to your DevOps team for production deployment.
 
